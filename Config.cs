@@ -12,6 +12,12 @@ public sealed class Config
     public string DictionaryPath { get; set; } = "Data/cedict.json";
     public string OcrLanguage { get; set; } = "zh-Hans-CN";
 
+    // 微软拼音通道（光标锚定 OCR）
+    public int MspPollIntervalMs { get; set; } = 120;
+    public int MspBandWidthPx { get; set; } = 560;
+    public int MspBandHeightPx { get; set; } = 120;
+    public int MspBandOffsetY { get; set; } = 8;
+
     public static Config Load()
     {
         try

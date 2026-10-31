@@ -24,9 +24,9 @@ public static partial class CandidateParser
     [GeneratedRegex(@"^1\s*[\.。]?")]
     private static partial Regex LeadingOneRegex();
 
-    // 第一优先：数字+分隔符；第二优先：2-9 后直接跟非 ASCII（分隔符被 OCR 吞掉的情况）。
-    // 不允许 0/1 作为无分隔边界，避免“第1章”“4G”这类词中数字误切。
-    [GeneratedRegex(@"\d{1,2}\s*[\.。]|[2-9](?=[^\x00-\x7F])")]
+    // 边界优先级：数字+分隔符 → 数字+空格+汉字（微软拼音候选行为空格分隔）→ 2-9 后直接跟非 ASCII。
+    // 0/1 不作为无分隔边界，避免“第1章”“4G”这类词中数字误切。
+    [GeneratedRegex(@"\d{1,2}\s*[\.。]|[2-9](?=[^\x00-\x7F])|\d{1,2}\s+(?=[^\x00-\x7F])")]
     private static partial Regex ItemBoundaryRegex();
 
     [GeneratedRegex(@"[\u4e00-\u9fff]")]

@@ -12,7 +12,9 @@ public partial class App : Application
     private WinForms.NotifyIcon? _tray;
     private CancellationTokenSource? _cts;
     private Thread? _watcherThread;
+    private Thread? _mspThread;
     private CandidateWatcher? _watcher;
+    private MspWatcher? _mspWatcher;
     private Coordinator? _coordinator;
     private bool _paused;
     private WinForms.ToolStripMenuItem? _pauseItem;
@@ -45,6 +47,7 @@ public partial class App : Application
         _coordinator.Start(Dispatcher);
 
         _cts = new CancellationTokenSource();
+        PinyinTracker.Start();
         _watcher = new CandidateWatcher(cfg);
         _watcher.Event += ev => _coordinator.Post(ev);
         _watcherThread = new Thread(() => _watcher.Loop(_cts.Token))
@@ -53,6 +56,16 @@ public partial class App : Application
             Name = "glint-watcher",
         };
         _watcherThread.Start();
+
+        // 微软拼音通道（光标锚定 OCR，搜狗候选窗可见时自动让位）
+        _mspWatcher = new MspWatcher(cfg);
+        _mspWatcher.Event += ev => _coordinator.Post(ev);
+        _mspThread = new Thread(() => _mspWatcher.Loop(_cts.Token))
+        {
+            IsBackground = true,
+            Name = "glint-msp",
+        };
+        _mspThread.Start();
 
         SetupTray();
     }
@@ -73,6 +86,8 @@ public partial class App : Application
             _paused = !_paused;
             _pauseItem.Text = _paused ? "恢复" : "暂停";
             _watcher?.SetPaused(_paused);
+            _mspWatcher?.SetPaused(_paused);
+            PinyinTracker.SetPaused(_paused);
             if (_paused) _coordinator?.Post(new WatchEvent(false, default));
         };
         var exit = new WinForms.ToolStripMenuItem("退出");

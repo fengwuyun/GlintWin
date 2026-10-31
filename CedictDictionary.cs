@@ -78,22 +78,44 @@ public sealed class CedictDictionary
         return i == word.Length && parts.Count > 0 ? string.Join(" / ", parts) : null;
     }
 
+    public string? PinyinOf(string word) => _map.TryGetValue(word, out var e) ? e.Pinyin : null;
+
+    /// <summary>拼音归一化：仅保留小写字母（去声调数字/空格/隔音符）。</summary>
+    public static string NormPinyin(string p)
+    {
+        var sb = new StringBuilder(p.Length);
+        foreach (var ch in p)
+        {
+            if (ch is >= 'A' and <= 'Z') sb.Append((char)(ch + 32));
+            else if (ch is >= 'a' and <= 'z') sb.Append(ch);
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>拼音前缀兼容：组词进行中拼音可能只是词拼音的前缀（或相反）。</summary>
+    public static bool PinyinCompatible(string a, string b)
+    {
+        var na = NormPinyin(a);
+        var nb = NormPinyin(b);
+        if (na.Length == 0 || nb.Length == 0) return false;
+        return na.StartsWith(nb, StringComparison.Ordinal) || nb.StartsWith(na, StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// 拼音交叉验证纠错：在词典中找与 <paramref name="word"/> 等长、至多差 1 字、
-    /// 且拼音与组词拼音一致的词。拼音对不上的一律不纠正（宁缺勿错）。
+    /// 且拼音与组词拼音前缀兼容的词。拼音对不上的一律不纠正（宁缺勿错）。
     /// </summary>
     public string? FuzzyCorrect(string word, string? compositionPinyin)
     {
         if (compositionPinyin is null || word.Length is < 2 or > 6) return null;
-        var norm = NormPinyin(compositionPinyin);
-        if (norm.Length == 0) return null;
+        if (NormPinyin(compositionPinyin).Length == 0) return null;
 
         string? best = null;
         foreach (var kv in _map)
         {
             if (kv.Key.Length != word.Length) continue;
             if (!WithinOneChar(kv.Key, word)) continue;
-            if (!string.Equals(NormPinyin(kv.Value.Pinyin), norm, StringComparison.Ordinal)) continue;
+            if (!PinyinCompatible(kv.Value.Pinyin, compositionPinyin)) continue;
             if (best is null || string.CompareOrdinal(kv.Key, best) < 0) best = kv.Key;
         }
         return best;
@@ -107,17 +129,6 @@ public sealed class CedictDictionary
             if (a[i] != b[i] && ++diff > 1) return false;
         }
         return true;
-    }
-
-    private static string NormPinyin(string p)
-    {
-        var sb = new StringBuilder(p.Length);
-        foreach (var ch in p)
-        {
-            if (ch is >= 'A' and <= 'Z') sb.Append((char)(ch + 32));
-            else if (ch is >= 'a' and <= 'z') sb.Append(ch);
-        }
-        return sb.ToString();
     }
 
     /// <summary>取前两个释义，去掉 “to ” 前缀与括号注释，用 “ · ” 连接。</summary>

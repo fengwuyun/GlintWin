@@ -32,9 +32,19 @@ Check("Parse 拼音", pr.Pinyin, "nihao'shijie");
 Check("Parse 候选", pr.Top, "你好世界");
 Check("拼音混入光标字符", CandidateParser.Parse(new[] { "nihao'shijieIl", "1.你好世界" }).Pinyin, "nihao'shijie");
 
+// ---------- 微软拼音格式（空格分隔，无点号） ----------
+Check("MSP 空格分隔", CandidateParser.ExtractTop("1 你好世界 2 你好 3 你号"), "你好世界");
+Check("MSP 首序号被吞", CandidateParser.ExtractTop("你好世界 2 你好 3 你号"), "你好世界");
+Check("MSP 词内数字不误切", CandidateParser.ExtractTop("1 第 3 章 2 第一章"), "第");
+
 // ---------- 词级坐标 ExtractChunksFromRow ----------
 OcrLineData Row(params (string Text, double X, double W)[] words) =>
     new("row", words.Select(w => new OcrWordData(w.Text, w.X, 0, w.W, 16)).ToList());
+
+// MSP 候选行：数字与词分开渲染
+var rowMsp = Row(("1", 0, 8), ("你好世界", 12, 90), ("2", 110, 8), ("你好", 122, 40));
+var cMsp = CandidateParser.ExtractChunksFromRow(rowMsp);
+Check("词级-MSP 空格分隔 首块", cMsp.Count > 0 ? cMsp[0] : null, "你好世界");
 
 // 序号可见：1. 与 候选词 间隙小（同一块），候选之间间隙大
 var row1 = Row(("1.", 0, 10), ("学习", 12, 40), ("2.", 70, 10), ("字习", 82, 40), ("3.", 140, 10), ("血洗", 152, 40));

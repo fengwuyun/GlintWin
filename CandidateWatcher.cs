@@ -2,7 +2,7 @@ using System.Text;
 
 namespace GlintWin;
 
-public readonly record struct WatchEvent(bool Visible, NativeMethods.RECT Rect);
+public readonly record struct WatchEvent(bool Visible, NativeMethods.RECT Rect, bool RequireNumbered = false);
 
 /// <summary>
 /// 后台轮询线程：发现输入法候选窗口（如搜狗 SoPY_Comp）的显示/移动/隐藏，
@@ -92,5 +92,35 @@ public sealed class CandidateWatcher
             return true;
         _hits.Add(h);
         return true;
+    }
+
+    // ---- 静态工具：供微软拼音通道仲裁（搜狗候选窗可见时让位） ----
+    private static readonly List<IntPtr> s_staticHits = new();
+    private static string? s_staticFilter;
+    private static NativeMethods.EnumWindowsProc? s_staticProc;
+
+    private static bool OnEnumStatic(IntPtr h, IntPtr l)
+    {
+        if (!NativeMethods.IsWindowVisible(h)) return true;
+        var sb = new StringBuilder(64);
+        NativeMethods.GetClassName(h, sb, 64);
+        if (!string.Equals(sb.ToString(), s_staticFilter, StringComparison.Ordinal)) return true;
+        s_staticHits.Add(h);
+        return true;
+    }
+
+    /// <summary>搜狗候选窗当前是否可见（用于双通道仲裁）。</summary>
+    public static bool SogouCandidateVisible(Config cfg)
+    {
+        s_staticFilter = cfg.CandidateWindowClass;
+        s_staticProc ??= OnEnumStatic;
+        s_staticHits.Clear();
+        NativeMethods.EnumWindows(s_staticProc, IntPtr.Zero);
+        foreach (var h in s_staticHits)
+        {
+            if (!NativeMethods.GetWindowRect(h, out var r)) continue;
+            if (r.Right - r.Left >= 100 && r.Bottom - r.Top >= 24) return true;
+        }
+        return false;
     }
 }

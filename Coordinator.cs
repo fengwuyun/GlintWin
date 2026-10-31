@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using System.Windows.Threading;
 using Color = System.Windows.Media.Color;
@@ -15,7 +16,7 @@ public sealed record SkinTheme(Color Bg, Color Fg, double RowTextHeightPx);
 /// 防闪烁：只哈希候选行区域（避开拼音框光标闪烁/皮肤动画）并混入窗口坐标（窗口移动必刷新）、
 /// 主题色与字号指数平滑、解析偶发失败时短时间保持原样、首显需连续两帧一致。
 /// </summary>
-public sealed class Coordinator
+public sealed partial class Coordinator
 {
     private const double OcrScale = 2.0;   // 小字放大后再识别，显著提升准确率
 
@@ -79,18 +80,18 @@ public sealed class Coordinator
             {
                 try
                 {
-                    if (!e.Visible)
-                    {
-                        ResetTransient();
-                        if (_pillVisible)
+                if (!e.Visible)
                         {
-                            _pillVisible = false;
-                            await OnUi(() => _overlay!.HidePill());
+                            ResetTransient();
+                            if (_pillVisible)
+                            {
+                                _pillVisible = false;
+                                await OnUi(() => _overlay!.HidePill());
+                            }
+                            continue;
                         }
-                        continue;
-                    }
                     if (!_ocr.Available) continue;
-                    await ProcessRectAsync(e.Rect);
+                    await ProcessRectAsync(e.Rect, e.RequireNumbered);
                 }
                 catch (Exception ex)
                 {
@@ -117,7 +118,7 @@ public sealed class Coordinator
         _lastGoodParse = DateTime.MinValue;
     }
 
-    private async Task ProcessRectAsync(NativeMethods.RECT rect)
+    private async Task ProcessRectAsync(NativeMethods.RECT rect, bool strict)
     {
         int w = rect.Right - rect.Left;
         int h = rect.Bottom - rect.Top;
@@ -183,12 +184,22 @@ public sealed class Coordinator
                 }
 
                 // 优先：候选行内按词间隙切出候选块，块 0 = 第一候选
-                var rowLine = FindRowLine(_lastLines, parsed.Top);
+                var rowLine = FindRowLine(_lastLines, parsed.Top, strict);
                 var chunks = rowLine != null
                     ? CandidateParser.ExtractChunksFromRow(rowLine)
                     : new List<string>();
-                var newTop = chunks.Count > 0 ? chunks[0] : parsed.Top;
-                var (resolvedTop, resolvedGloss) = ResolveTop(newTop);
+                string? newTop;
+                if (strict && (rowLine is null || CountNumberedMarkers(rowLine.Text) < 2))
+                {
+                    // 微软拼音通道：候选栏必然包含 ≥2 个数字序号项；
+                    // 只有单行数字+汉字（如正文里的「25 天」）不算候选，防止把应用正文误判为候选词
+                    newTop = null;
+                }
+                else
+                {
+                    newTop = chunks.Count > 0 ? chunks[0] : parsed.Top;
+                }
+                var (resolvedTop, resolvedGloss) = ResolveTop(newTop, strict);
 
                 _lastTop = resolvedTop;
                 _lastGloss = resolvedGloss;
@@ -225,7 +236,7 @@ public sealed class Coordinator
                 var themeInfo = _lastTheme != null
                     ? $"{_lastTheme.Bg}/{_lastTheme.Fg}/h{_lastTheme.RowTextHeightPx:F0}"
                     : "default";
-                Logger.Info($"top={_lastTop} gloss={_lastGloss} chunks=[{string.Join("|", chunks)}] pinyin={_lastPinyin} theme={themeInfo} lines=[{string.Join(" / ", _lastLines.Select(l => l.Text))}]");
+                Logger.Info($"top={_lastTop} gloss={_lastGloss} strict={strict} chunks=[{string.Join("|", chunks)}] pinyin={_lastPinyin} theme={themeInfo} lines=[{string.Join(" / ", _lastLines.Select(l => l.Text))}]");
             }
             top = _lastTop;
             gloss = _lastGloss;
@@ -281,27 +292,46 @@ public sealed class Coordinator
         });
     }
 
-    /// <summary>查词典；查不到时用组词拼音做交叉验证纠错（宁缺勿错）。</summary>
-    private (string? Top, string? Gloss) ResolveTop(string? top)
+    /// <summary>
+    /// 查词典；查不到时用组词拼音做交叉验证纠错（宁缺勿错）。
+    /// strict（微软拼音通道）时额外用键盘拼音与候选词典拼音做前缀兼容校验，杜绝正文误报。
+    /// </summary>
+    private (string? Top, string? Gloss) ResolveTop(string? top, bool strict)
     {
         if (top is null) return (null, null);
         var gloss = _dict?.Lookup(top);
-        if (gloss != null) return (top, gloss);
-
-        if (_dict != null && _lastPinyin != null)
+        if (gloss != null)
         {
-            var fixedWord = _dict.FuzzyCorrect(top, _lastPinyin);
+            if (strict && !PinyinCompatibleWithKeyboard(top)) return (null, null);
+            return (top, gloss);
+        }
+
+        // 纠错：优先用键盘钩子的权威拼音，其次 OCR 拼音
+        var hint = PinyinTracker.CurrentPinyin ?? _lastPinyin;
+        if (_dict != null && !string.IsNullOrEmpty(hint))
+        {
+            var fixedWord = _dict.FuzzyCorrect(top, hint);
             if (fixedWord != null)
             {
                 var fixedGloss = _dict.Lookup(fixedWord);
                 if (fixedGloss != null)
                 {
-                    Logger.Info($"fuzzy: {top} -> {fixedWord} (pinyin={_lastPinyin})");
+                    Logger.Info($"fuzzy: {top} -> {fixedWord} (pinyin={hint})");
+                    if (strict && !PinyinCompatibleWithKeyboard(fixedWord)) return (null, null);
                     return (fixedWord, fixedGloss);
                 }
             }
         }
         return (top, null);
+    }
+
+    private bool PinyinCompatibleWithKeyboard(string word)
+    {
+        var hint = PinyinTracker.CurrentPinyin;
+        if (string.IsNullOrEmpty(hint)) return true;      // 无键盘拼音（如搜狗通道未打字）不否决
+        var dictPy = _dict?.PinyinOf(word);
+        if (dictPy is null) return true;                  // 词典外词无法验证，不否决
+        return CedictDictionary.PinyinCompatible(dictPy, hint);
     }
 
     private static IReadOnlyList<OcrLineData> ScaleLines(IReadOnlyList<OcrLineData> lines, double k) =>
@@ -393,15 +423,20 @@ public sealed class Coordinator
         (byte)(a.G + (b.G - a.G) * t),
         (byte)(a.B + (b.B - a.B) * t));
 
-    /// <summary>候选行 = 包含 top 的 OCR 行，退而求其次取含数字+汉字的行。</summary>
-    private static OcrLineData? FindRowLine(IReadOnlyList<OcrLineData> lines, string? top)
+    /// <summary>候选行 = 包含 top 的 OCR 行，退而求其次取含数字+汉字的行。strict 时行内必须含数字。</summary>
+    private static OcrLineData? FindRowLine(IReadOnlyList<OcrLineData> lines, string? top, bool strict)
     {
         OcrLineData? best = null;
         foreach (var l in lines)
         {
             if (l.Words.Count == 0) continue;
-            if (top != null && l.Text.Replace(" ", "").Contains(top)) return l;
-            if (best == null && l.Text.Any(char.IsDigit) && l.Text.Any(IsCjk)) best = l;
+            var hasDigit = l.Text.Any(char.IsDigit);
+            if (top != null && l.Text.Replace(" ", "").Contains(top))
+            {
+                if (!strict || hasDigit) return l;
+                continue;
+            }
+            if (best == null && hasDigit && l.Text.Any(IsCjk)) best = l;
         }
         return best;
     }
@@ -423,6 +458,12 @@ public sealed class Coordinator
     }
 
     private static bool IsCjk(char c) => c is >= '\u4e00' and <= '\u9fff';
+
+    [GeneratedRegex(@"(?:^|\s)\d{1,2}\s*[\.．、]\s*(?=[^\x00-\x7F])|\s\d{1,2}\s+(?=[^\x00-\x7F])")]
+    private static partial Regex NumberedMarkerRegex();
+
+    /// <summary>统计行内数字序号标记数（如 “1.” “2 ”）。</summary>
+    private static int CountNumberedMarkers(string text) => NumberedMarkerRegex().Matches(text).Count;
 
     /// <summary>
     /// 在候选行区域统计颜色：最高频色 = 背景色（皮肤）；与背景对比度足够高的最高频色 = 文字色。
