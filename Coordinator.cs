@@ -1,0 +1,516 @@
+using System.Drawing;
+using System.Runtime.InteropServices;
+using System.Threading.Channels;
+using System.Windows.Threading;
+using Color = System.Windows.Media.Color;
+
+namespace GlintWin;
+
+/// <summary>从候选行像素采样的皮肤主题：悬浮条直接沿用输入法皮肤配色。</summary>
+public sealed record SkinTheme(Color Bg, Color Fg, double RowTextHeightPx);
+
+/// <summary>
+/// 中枢：把「候选窗口可见/移动/隐藏」事件变成
+/// 「截图 → 像素哈希去重 → 2x 放大 OCR → 解析 → 皮肤取色 → 查词典/纠错 → 更新悬浮条」的流水线。
+/// 防闪烁：只哈希候选行区域（避开拼音框光标闪烁/皮肤动画）并混入窗口坐标（窗口移动必刷新）、
+/// 主题色与字号指数平滑、解析偶发失败时短时间保持原样、首显需连续两帧一致。
+/// </summary>
+public sealed class Coordinator
+{
+    private const double OcrScale = 2.0;   // 小字放大后再识别，显著提升准确率
+
+    private readonly Config _cfg;
+    private readonly OcrService _ocr;
+    private readonly CedictDictionary? _dict;
+    private readonly Channel<WatchEvent> _channel = Channel.CreateUnbounded<WatchEvent>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+
+    private readonly SemaphoreSlim _ocrGate = new(1, 1);
+    private byte[]? _pixelBuf;
+
+    private OverlayWindow? _overlay;
+    private Dispatcher? _dispatcher;
+
+    // OCR 结果（仅在候选行像素/窗口位置变化时刷新）
+    private int _lastHash;
+    private IReadOnlyList<OcrLineData> _lastLines = Array.Empty<OcrLineData>();
+    private string? _lastTop;
+    private string? _lastGloss;
+    private string? _lastPinyin;
+    private NativeMethods.RECT _lastRowRect;
+    private bool _lastHasRow;
+    private SkinTheme? _lastTheme;
+
+    // 防闪烁 / 节流状态
+    private Rectangle? _hashRowBmp;   // 上次 OCR 的候选行（位图坐标），哈希只看这里
+    private Size _hashRowWin;         // 该候选行对应的窗口尺寸（变了就失效）
+    private NativeMethods.RECT _lastCaptureRect;
+    private long _lastCheckMs;
+    private string? _shownTop;        // 悬浮条当前显示的内容
+    private string? _shownGloss;
+    private string? _shownPinyin;
+    private SkinTheme? _shownTheme;
+    private string? _pendingTop;      // 首显确认：连续两帧一致才让悬浮条出现
+    private DateTime _lastGoodParse = DateTime.MinValue;
+    private bool _pillVisible;
+
+    public Coordinator(Config cfg, CedictDictionary? dict)
+    {
+        _cfg = cfg;
+        _dict = dict;
+        _ocr = new OcrService(cfg.OcrLanguage);
+    }
+
+    public void Start(Dispatcher dispatcher)
+    {
+        _dispatcher = dispatcher;
+        _overlay = new OverlayWindow(_cfg);
+        _overlay.ShowOffscreen();
+        _ = Task.Run(ConsumeAsync);
+    }
+
+    public void Post(WatchEvent e) => _channel.Writer.TryWrite(e);
+
+    private async Task ConsumeAsync()
+    {
+        try
+        {
+            await foreach (var e in _channel.Reader.ReadAllAsync())
+            {
+                try
+                {
+                    if (!e.Visible)
+                    {
+                        ResetTransient();
+                        if (_pillVisible)
+                        {
+                            _pillVisible = false;
+                            await OnUi(() => _overlay!.HidePill());
+                        }
+                        continue;
+                    }
+                    if (!_ocr.Available) continue;
+                    await ProcessRectAsync(e.Rect);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("consume: " + ex.Message);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("consumer loop: " + ex);
+        }
+    }
+
+    private void ResetTransient()
+    {
+        _lastHash = 0;
+        _hashRowBmp = null;
+        _lastTheme = null;
+        _lastCaptureRect = default;
+        _lastCheckMs = 0;
+        _shownTop = _shownGloss = _shownPinyin = null;
+        _shownTheme = null;
+        _pendingTop = null;
+        _lastGoodParse = DateTime.MinValue;
+    }
+
+    private async Task ProcessRectAsync(NativeMethods.RECT rect)
+    {
+        int w = rect.Right - rect.Left;
+        int h = rect.Bottom - rect.Top;
+        if (w <= 10 || h <= 10) return;
+
+        // 窗口位置未变时限频采样（内容变化几乎总伴随窗口尺寸变化）
+        bool sameRect = _lastCaptureRect.Left == rect.Left && _lastCaptureRect.Top == rect.Top
+            && _lastCaptureRect.Right == rect.Right && _lastCaptureRect.Bottom == rect.Bottom;
+        long nowMs = Environment.TickCount64;
+        if (sameRect && nowMs - _lastCheckMs < 250) return;
+        _lastCaptureRect = rect;
+        _lastCheckMs = nowMs;
+
+        bool hashChanged;
+        string? top, gloss, pinyin;
+        NativeMethods.RECT anchor;
+        int anchorOffset;
+        SkinTheme? theme;
+
+        await _ocrGate.WaitAsync();
+        try
+        {
+            using var bmp = Capture(rect.Left, rect.Top, w, h);
+            var bytes = GetPixels(bmp);
+
+            // 哈希区域：优先用上次的候选行（拼音框光标闪烁、皮肤动画都在行外）；
+            // 窗口尺寸变了或未知时退化为下半部（候选行所在区域）。
+            // 再混入窗口坐标：同一内容出现在新位置时也强制刷新，避免悬浮条留在旧位置。
+            var hashRect = _hashRowBmp.HasValue && _hashRowWin.Width == w && _hashRowWin.Height == h
+                ? ClampRect(_hashRowBmp.Value, w, h)
+                : new Rectangle(0, h * 55 / 100, w, h - h * 55 / 100);
+            int hash = HashCode.Combine(HashRegion(bytes, w, hashRect), rect.Left, rect.Top, w, h);
+            hashChanged = hash != _lastHash;
+            if (hashChanged)
+            {
+                _lastHash = hash;
+
+                // 2x 放大后 OCR（小字识别准确率显著提升），词坐标除回去
+                using var big = new Bitmap(w * 2, h * 2, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                using (var g = Graphics.FromImage(big))
+                {
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                    g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                    g.DrawImage(bmp, 0, 0, w * 2, h * 2);
+                }
+                var bigBytes = GetPixels(big);
+                _lastLines = ScaleLines(await _ocr.RecognizeAsync(bigBytes, big.Width, big.Height), 1.0 / OcrScale);
+
+                var parsed = CandidateParser.Parse(_lastLines.Select(l => l.Text).ToList());
+                _lastPinyin = parsed.Pinyin;
+
+                // 拼音框是彩底浅字，常规 OCR 常整块跳过：整窗增强识别补拿拼音（纠错用）。
+                // 注意拼音框位置随皮肤变化（可能在中部），不能按固定比例裁剪，直接增强全窗。
+                if (string.IsNullOrEmpty(_lastPinyin))
+                {
+                    var enhanced = await _ocr.RecognizeEnhancedAsync(bmp, new Rectangle(0, 0, w, h));
+                    if (enhanced.Count > 0)
+                    {
+                        _lastPinyin = CandidateParser.Parse(enhanced).Pinyin;
+                        if (_lastPinyin != null)
+                            Logger.Info($"pinyin(enhanced)={_lastPinyin}");
+                    }
+                }
+
+                // 优先：候选行内按词间隙切出候选块，块 0 = 第一候选
+                var rowLine = FindRowLine(_lastLines, parsed.Top);
+                var chunks = rowLine != null
+                    ? CandidateParser.ExtractChunksFromRow(rowLine)
+                    : new List<string>();
+                var newTop = chunks.Count > 0 ? chunks[0] : parsed.Top;
+                var (resolvedTop, resolvedGloss) = ResolveTop(newTop);
+
+                _lastTop = resolvedTop;
+                _lastGloss = resolvedGloss;
+
+                var rowBmp = rowLine is null ? null : LineRect(rowLine);
+                if (rowBmp.HasValue)
+                {
+                    _lastRowRect = new NativeMethods.RECT
+                    {
+                        Left = rect.Left + rowBmp.Value.X,
+                        Top = rect.Top + rowBmp.Value.Y,
+                        Right = rect.Left + rowBmp.Value.X + rowBmp.Value.Width,
+                        Bottom = rect.Top + rowBmp.Value.Y + rowBmp.Value.Height,
+                    };
+                    _lastHasRow = true;
+                    _hashRowBmp = rowBmp;
+                    _hashRowWin = new Size(w, h);
+                }
+                else
+                {
+                    // 这一帧没找到行：沿用上一帧行位置，避免锚点抖动
+                    _lastHasRow = _hashRowBmp.HasValue;
+                }
+
+                var sampled = rowBmp.HasValue ? SampleTheme(bytes, w, h, rowBmp) : _lastTheme;
+                if (sampled is not null)
+                {
+                    // 对比度归一：浅底强制深字/深底强制浅字，消除皮肤高亮淡入导致的灰色深浅抖动
+                    sampled = new SkinTheme(sampled.Bg,
+                        EnsureContrast(sampled.Bg, sampled.Fg), sampled.RowTextHeightPx);
+                }
+                _lastTheme = SmoothTheme(_lastTheme, sampled);
+
+                var themeInfo = _lastTheme != null
+                    ? $"{_lastTheme.Bg}/{_lastTheme.Fg}/h{_lastTheme.RowTextHeightPx:F0}"
+                    : "default";
+                Logger.Info($"top={_lastTop} gloss={_lastGloss} chunks=[{string.Join("|", chunks)}] pinyin={_lastPinyin} theme={themeInfo} lines=[{string.Join(" / ", _lastLines.Select(l => l.Text))}]");
+            }
+            top = _lastTop;
+            gloss = _lastGloss;
+            pinyin = _lastPinyin;
+            theme = _lastTheme;
+            (anchor, anchorOffset) = _lastHasRow ? (_lastRowRect, 4) : (rect, 6);
+        }
+        finally
+        {
+            _ocrGate.Release();
+        }
+
+        if (string.IsNullOrEmpty(top))
+        {
+            // 组词中偶发解析失败：短时间内保持原样，不闪隐
+            if (_pillVisible && (DateTime.UtcNow - _lastGoodParse).TotalMilliseconds < 500) return;
+            if (_pillVisible)
+            {
+                _pillVisible = false;
+                await OnUi(() => _overlay!.HidePill());
+            }
+            return;
+        }
+        _lastGoodParse = DateTime.UtcNow;
+
+        // 首显确认：候选窗刚弹出时高亮在淡入，前 1-2 帧常解析出碎片字（囗/亻），
+        // 连续两帧同一候选才让悬浮条出现，避免先闪一下错字再纠正
+        if (!_pillVisible)
+        {
+            if (top != _pendingTop)
+            {
+                _pendingTop = top;
+                return;
+            }
+            _pendingTop = null;
+        }
+
+        // 内容没变就不重绘（主题平滑后微小色差也不重绘），位置照常跟随
+        bool contentChanged = top != _shownTop || gloss != _shownGloss || pinyin != _shownPinyin;
+        bool themeChanged = ThemeDiffers(theme, _shownTheme);
+        _pillVisible = true;
+        await OnUi(() =>
+        {
+            if (contentChanged || themeChanged)
+            {
+                _overlay!.Update(top!, gloss, pinyin, theme);
+                _shownTop = top;
+                _shownGloss = gloss;
+                _shownPinyin = pinyin;
+                _shownTheme = theme;
+            }
+            _overlay!.Place(anchor, anchorOffset);
+        });
+    }
+
+    /// <summary>查词典；查不到时用组词拼音做交叉验证纠错（宁缺勿错）。</summary>
+    private (string? Top, string? Gloss) ResolveTop(string? top)
+    {
+        if (top is null) return (null, null);
+        var gloss = _dict?.Lookup(top);
+        if (gloss != null) return (top, gloss);
+
+        if (_dict != null && _lastPinyin != null)
+        {
+            var fixedWord = _dict.FuzzyCorrect(top, _lastPinyin);
+            if (fixedWord != null)
+            {
+                var fixedGloss = _dict.Lookup(fixedWord);
+                if (fixedGloss != null)
+                {
+                    Logger.Info($"fuzzy: {top} -> {fixedWord} (pinyin={_lastPinyin})");
+                    return (fixedWord, fixedGloss);
+                }
+            }
+        }
+        return (top, null);
+    }
+
+    private static IReadOnlyList<OcrLineData> ScaleLines(IReadOnlyList<OcrLineData> lines, double k) =>
+        lines.Select(l => new OcrLineData(l.Text,
+            l.Words.Select(x => new OcrWordData(x.Text, x.X * k, x.Y * k, x.Width * k, x.Height * k)).ToList()
+        )).ToList();
+
+    private async Task OnUi(Action action) => await _dispatcher!.InvokeAsync(action);
+
+    private static Bitmap Capture(int x, int y, int w, int h)
+    {
+        var bmp = new Bitmap(w, h, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(bmp);
+        g.CopyFromScreen(x, y, 0, 0, new Size(w, h));
+        return bmp;
+    }
+
+    private byte[] GetPixels(Bitmap bmp)
+    {
+        var bd = bmp.LockBits(
+            new Rectangle(0, 0, bmp.Width, bmp.Height),
+            System.Drawing.Imaging.ImageLockMode.ReadOnly,
+            System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        try
+        {
+            int need = bd.Stride * bd.Height;
+            if (_pixelBuf is null || _pixelBuf.Length < need) _pixelBuf = new byte[need];
+            Marshal.Copy(bd.Scan0, _pixelBuf, 0, need);
+            return _pixelBuf;
+        }
+        finally
+        {
+            bmp.UnlockBits(bd);
+        }
+    }
+
+    private static Rectangle ClampRect(Rectangle r, int w, int h)
+    {
+        r.Intersect(new Rectangle(0, 0, w, h));
+        return r;
+    }
+
+    /// <summary>只对区域内像素的 RGB 做 FNV 哈希（alpha 恒定不参与）。</summary>
+    private static int HashRegion(byte[] bgra, int width, Rectangle r)
+    {
+        unchecked
+        {
+            uint h = 2166136261;
+            for (int y = r.Top; y < r.Bottom; y++)
+            {
+                int baseIdx = y * width * 4;
+                for (int x = r.Left; x < r.Right; x++)
+                {
+                    int i = baseIdx + x * 4;
+                    h ^= bgra[i];
+                    h *= 16777619;
+                    h ^= bgra[i + 1];
+                    h *= 16777619;
+                    h ^= bgra[i + 2];
+                    h *= 16777619;
+                }
+            }
+            return (int)h;
+        }
+    }
+
+    private static SkinTheme? SmoothTheme(SkinTheme? old, SkinTheme? now)
+    {
+        if (now is null) return old;
+        if (old is null) return now;
+        const double k = 0.5;
+        return new SkinTheme(
+            LerpColor(old.Bg, now.Bg, k),
+            LerpColor(old.Fg, now.Fg, k),
+            old.RowTextHeightPx * (1 - k) + now.RowTextHeightPx * k);
+    }
+
+    private static bool ThemeDiffers(SkinTheme? a, SkinTheme? b)
+    {
+        if (a is null && b is null) return false;
+        if (a is null || b is null) return true;
+        return ColorDist(a.Bg, b.Bg) > 30
+            || ColorDist(a.Fg, b.Fg) > 30
+            || Math.Abs(a.RowTextHeightPx - b.RowTextHeightPx) > 2.0;
+    }
+
+    private static Color LerpColor(Color a, Color b, double t) => Color.FromRgb(
+        (byte)(a.R + (b.R - a.R) * t),
+        (byte)(a.G + (b.G - a.G) * t),
+        (byte)(a.B + (b.B - a.B) * t));
+
+    /// <summary>候选行 = 包含 top 的 OCR 行，退而求其次取含数字+汉字的行。</summary>
+    private static OcrLineData? FindRowLine(IReadOnlyList<OcrLineData> lines, string? top)
+    {
+        OcrLineData? best = null;
+        foreach (var l in lines)
+        {
+            if (l.Words.Count == 0) continue;
+            if (top != null && l.Text.Replace(" ", "").Contains(top)) return l;
+            if (best == null && l.Text.Any(char.IsDigit) && l.Text.Any(IsCjk)) best = l;
+        }
+        return best;
+    }
+
+    private static Rectangle? LineRect(OcrLineData line)
+    {
+        double minX = double.MaxValue, minY = double.MaxValue, maxX = 0, maxY = 0;
+        foreach (var wd in line.Words)
+        {
+            minX = Math.Min(minX, wd.X);
+            minY = Math.Min(minY, wd.Y);
+            maxX = Math.Max(maxX, wd.X + wd.Width);
+            maxY = Math.Max(maxY, wd.Y + wd.Height);
+        }
+        if (maxX <= minX || maxY <= minY) return null;
+        return new Rectangle(
+            (int)Math.Floor(minX), (int)Math.Floor(minY),
+            (int)Math.Ceiling(maxX - minX), (int)Math.Ceiling(maxY - minY));
+    }
+
+    private static bool IsCjk(char c) => c is >= '\u4e00' and <= '\u9fff';
+
+    /// <summary>
+    /// 在候选行区域统计颜色：最高频色 = 背景色（皮肤）；与背景对比度足够高的最高频色 = 文字色。
+    /// 置信度不足时返回 null（悬浮条保持深色主题）。
+    /// </summary>
+    private static SkinTheme? SampleTheme(byte[] bgra, int width, int height, Rectangle? rowRect)
+    {
+        var r = rowRect ?? new Rectangle(0, height * 55 / 100, width, height * 40 / 100);
+        r = ClampRect(r, width, height);
+        if (r.Width < 20 || r.Height < 8) return null;
+
+        var counts = new int[4096];
+        long total = 0;
+        for (int y = r.Top; y < r.Bottom; y++)
+        {
+            int baseIdx = y * width * 4;
+            for (int x = r.Left; x < r.Right; x++)
+            {
+                int i = baseIdx + x * 4;
+                int key = ((bgra[i + 2] >> 4) << 8) | ((bgra[i + 1] >> 4) << 4) | (bgra[i] >> 4);
+                counts[key]++;
+                total++;
+            }
+        }
+        if (total == 0) return null;
+
+        int bgKey = 0, bgCount = 0;
+        for (int k = 0; k < counts.Length; k++)
+        {
+            if (counts[k] > bgCount)
+            {
+                bgCount = counts[k];
+                bgKey = k;
+            }
+        }
+        if (bgCount < total * 0.30) return null;   // 背景不占优 → 取色不可信
+
+        Color BgFromKey(int key)
+        {
+            int rQ = (key >> 8) & 0xF, gQ = (key >> 4) & 0xF, bQ = key & 0xF;
+            return Color.FromRgb((byte)((rQ << 4) + 8), (byte)((gQ << 4) + 8), (byte)((bQ << 4) + 8));
+        }
+        var bg = BgFromKey(bgKey);
+
+        // 文字色：频率 × 与背景的欧氏距离，取最高分
+        Color? fg = null;
+        double bestScore = 0;
+        for (int k = 0; k < counts.Length; k++)
+        {
+            int c = counts[k];
+            if (c < Math.Max(8, total * 0.004)) continue;
+            var col = BgFromKey(k);
+            double d = ColorDist(col, bg);
+            if (d < 110) continue;
+            double score = c * d;
+            if (score > bestScore)
+            {
+                bestScore = score;
+                fg = col;
+            }
+        }
+        var fgColor = fg ?? FallbackFg(bg);
+
+        return new SkinTheme(bg, fgColor, r.Height);
+    }
+
+    private static double ColorDist(Color a, Color b)
+    {
+        int dr = a.R - b.R, dg = a.G - b.G, db = a.B - b.B;
+        return Math.Sqrt(dr * dr + dg * dg + db * db);
+    }
+
+    private static double Luminance(Color c) => 0.299 * c.R + 0.587 * c.G + 0.114 * c.B;
+
+    /// <summary>保证文字与背景的亮度差 ≥ need，不足时把文字推向黑/白。</summary>
+    private static Color EnsureContrast(Color bg, Color fg, double need = 90)
+    {
+        double lb = Luminance(bg), lf = Luminance(fg);
+        if (Math.Abs(lf - lb) >= need) return fg;
+        if (lf > lb)
+        {
+            double t = Math.Clamp((need - (lf - lb)) / (255 - lf), 0, 1);
+            return LerpColor(fg, Color.FromRgb(255, 255, 255), t);
+        }
+        double t2 = Math.Clamp((need - (lb - lf)) / Math.Max(lf, 1), 0, 1);
+        return LerpColor(fg, Color.FromRgb(0, 0, 0), t2);
+    }
+
+    private static Color FallbackFg(Color bg) =>
+        Luminance(bg) > 140 ? Color.FromRgb(0x2A, 0x2C, 0x30) : Color.FromRgb(0xF2, 0xF5, 0xFA);
+}

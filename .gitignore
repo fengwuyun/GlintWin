@@ -1,0 +1,15 @@
+bin/
+obj/
+publish/
+.vs/
+*.user
+
+# 子工程产物
+tools/ParserTest/bin/
+tools/ParserTest/obj/
+tools/OcrDiag/bin/
+tools/OcrDiag/obj/
+
+# 生成的数据（由 tools/convert_cedict.py 从 CC-CEDICT 生成，见 README）
+tools/cedict_raw.txt.gz
+Data/cedict.json
