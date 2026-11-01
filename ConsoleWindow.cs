@@ -47,7 +47,8 @@ public sealed class ConsoleWindow : Window
     private readonly Func<CedictDictionary?> _dictProvider;
     private readonly Action _reloadDictionary;
     private readonly ContentControl _pageHost = new();
-    private readonly List<(Border Item, Border Accent, string Key)> _navItems = new();
+    private readonly List<(Border Item, Border Accent, TextBlock Label, TextBlock Glyph, string Key)> _navItems = new();
+    private static readonly Brush NavIdleBrush = new SolidColorBrush(Color.FromRgb(0xC5, 0xC9, 0xD4));
     private string _activePage = "status";
     private readonly ObservableCollection<CustomWord> _customWords;
 
@@ -94,6 +95,7 @@ public sealed class ConsoleWindow : Window
         MinHeight = 560;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Background = BgWindowBrush;
+        Foreground = FgBrush;
         FontSize = 13.5;
         FontFamily = new FontFamily("Segoe UI, Microsoft YaHei UI");
         TrySetIcon();
@@ -173,8 +175,8 @@ public sealed class ConsoleWindow : Window
     private static TextBlock NavLabel(string t) => new()
     {
         Text = t,
-        FontSize = 11,
-        Foreground = FgSubBrush,
+        FontSize = 11.5,
+        Foreground = new SolidColorBrush(Color.FromRgb(0xAE, 0xB3, 0xC2)),
         Margin = new Thickness(8, 10, 0, 6),
     };
 
@@ -199,21 +201,25 @@ public sealed class ConsoleWindow : Window
             Margin = new Thickness(6, 0, 0, 0),
             Visibility = Visibility.Collapsed,
         };
-        var sp = new StackPanel { Orientation = Orientation.Horizontal };
-        sp.Children.Add(new TextBlock
+        var glyphTb = new TextBlock
         {
             Text = glyph,
             FontFamily = new FontFamily("Segoe MDL2 Assets"),
             FontSize = 15,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(8, 0, 10, 0),
-        });
-        sp.Children.Add(new TextBlock
+            Foreground = NavIdleBrush,
+        };
+        var labelTb = new TextBlock
         {
             Text = label,
             FontSize = 13.5,
             VerticalAlignment = VerticalAlignment.Center,
-        });
+            Foreground = NavIdleBrush,
+        };
+        var sp = new StackPanel { Orientation = Orientation.Horizontal };
+        sp.Children.Add(glyphTb);
+        sp.Children.Add(labelTb);
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -222,21 +228,24 @@ public sealed class ConsoleWindow : Window
         grid.Children.Add(accent);
         grid.Children.Add(sp);
         b.Child = grid;
-        b.Tag = accent;
+        b.Tag = (accent, labelTb, glyphTb);
         b.MouseLeftButtonUp += (_, _) => ShowPage(key);
         b.MouseEnter += (_, _) => { if (_activePage != key) b.Background = BgHoverBrush; };
         b.MouseLeave += (_, _) => { if (_activePage != key) b.Background = Brushes.Transparent; };
-        _navItems.Add((b, accent, key));
+        _navItems.Add((b, accent, labelTb, glyphTb, key));
         return b;
     }
 
     private void ShowPage(string key)
     {
         _activePage = key;
-        foreach (var (item, accent, k) in _navItems)
+        foreach (var (item, accent, labelTb, glyphTb, k) in _navItems)
         {
-            item.Background = k == key ? BgHoverBrush : Brushes.Transparent;
-            accent.Visibility = k == key ? Visibility.Visible : Visibility.Collapsed;
+            bool active = k == key;
+            item.Background = active ? BgHoverBrush : Brushes.Transparent;
+            accent.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+            labelTb.Foreground = active ? FgBrush : NavIdleBrush;
+            glyphTb.Foreground = active ? AccentBrush : NavIdleBrush;
         }
         _pageHost.Content = key switch
         {
