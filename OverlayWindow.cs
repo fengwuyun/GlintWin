@@ -130,7 +130,8 @@ public sealed class OverlayWindow : Window
         double scale = VisualTreeHelper.GetDpi(this).PixelsPerDip;
         int w = (int)Math.Ceiling(ActualWidth * scale);
         int h = (int)Math.Ceiling(ActualHeight * scale);
-        int x = anchor.Left;
+        // 让条内文字与候选行左沿对齐，外框向左延伸自身内边距。
+        int x = anchor.Left - (int)Math.Round(_border.Padding.Left * scale);
         int y = anchor.Bottom + offsetY;
 
         var mr = new NativeMethods.RECT

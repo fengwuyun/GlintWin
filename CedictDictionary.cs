@@ -17,28 +17,27 @@ public sealed class CedictDictionary
         [property: JsonPropertyName("p")] string Pinyin,
         [property: JsonPropertyName("s")] string[] Senses);
 
-    private sealed record Entry(string Pinyin, string[] Senses);
 
     private static readonly Regex ParenRegex = new(@"\([^)]*\)");
-    private readonly Dictionary<string, Entry> _map;
+    private readonly Dictionary<string, DictDto> _map;
 
     public int BaseCount { get; private set; }
     public int CustomCount { get; private set; }
     public Dictionary<string, int> PackCounts { get; } = new();
 
-    private CedictDictionary(Dictionary<string, Entry> map) => _map = map;
+    private CedictDictionary(Dictionary<string, DictDto> map) => _map = map;
 
     public static CedictDictionary? Load(string path)
     {
         try
         {
-            var dto = JsonSerializer.Deserialize<Dictionary<string, DictDto>>(File.ReadAllText(path));
-            var map = new Dictionary<string, Entry>(dto?.Count ?? 0, StringComparer.Ordinal);
-            if (dto != null)
-            {
-                foreach (var kv in dto)
-                    map[kv.Key] = new Entry(kv.Value.Pinyin ?? "", kv.Value.Senses ?? Array.Empty<string>());
-            }
+            using var stream = File.OpenRead(path);
+            var map = JsonSerializer.Deserialize<Dictionary<string, DictDto>>(stream)
+                ?? new Dictionary<string, DictDto>(StringComparer.Ordinal);
+            foreach (var kv in map)
+                if (kv.Value.Pinyin == null || kv.Value.Senses == null)
+                    map[kv.Key] = new DictDto(kv.Value.Pinyin ?? "", kv.Value.Senses ?? Array.Empty<string>());
+            map.TrimExcess();
             Logger.Info($"dictionary loaded: {map.Count} entries from {path}");
             var result = new CedictDictionary(map);
             result.BaseCount = map.Count;
@@ -55,7 +54,7 @@ public sealed class CedictDictionary
     public static CedictDictionary LoadAll(Config cfg)
     {
         var dict = Load(Path.Combine(AppContext.BaseDirectory, cfg.DictionaryPath))
-                   ?? new CedictDictionary(new Dictionary<string, Entry>(StringComparer.Ordinal));
+                   ?? new CedictDictionary(new Dictionary<string, DictDto>(StringComparer.Ordinal));
         dict.BaseCount = dict._map.Count;
 
         var packDir = Path.Combine(AppContext.BaseDirectory, "Data", "Packs");
@@ -84,10 +83,12 @@ public sealed class CedictDictionary
     {
         try
         {
-            var dto = JsonSerializer.Deserialize<Dictionary<string, DictDto>>(File.ReadAllText(path));
+            using var stream = File.OpenRead(path);
+            var dto = JsonSerializer.Deserialize<Dictionary<string, DictDto>>(stream);
             if (dto == null) return;
             foreach (var kv in dto)
-                _map[kv.Key] = new Entry(kv.Value.Pinyin ?? "", kv.Value.Senses ?? Array.Empty<string>());
+                _map[kv.Key] = kv.Value.Pinyin != null && kv.Value.Senses != null ? kv.Value
+                    : new DictDto(kv.Value.Pinyin ?? "", kv.Value.Senses ?? Array.Empty<string>());
         }
         catch (Exception ex)
         {
@@ -98,7 +99,7 @@ public sealed class CedictDictionary
     public string? Lookup(string word)
     {
         if (word.Length == 0) return null;
-        if (_map.TryGetValue(word, out var senses)) return Format(senses.Senses);
+        if (_map.TryGetValue(word, out var senses)) return Format(senses.Senses ?? Array.Empty<string>());
         if (word.Length is >= 2 and <= 6) return Segment(word);
         return null;
     }
@@ -120,7 +121,7 @@ public sealed class CedictDictionary
                 }
             }
             if (matched == 0) return null;
-            var gloss = Format(_map[word.Substring(i, matched)].Senses);
+            var gloss = Format(_map[word.Substring(i, matched)].Senses ?? Array.Empty<string>());
             if (gloss is null) return null;
             parts.Add(gloss);
             i += matched;

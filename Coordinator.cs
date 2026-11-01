@@ -23,14 +23,15 @@ public sealed partial class Coordinator
     private readonly Config _cfg;
     private readonly OcrService _ocr;
     private CedictDictionary? _dict;
-    private readonly Channel<WatchEvent> _channel = Channel.CreateUnbounded<WatchEvent>(
-        new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+    private readonly Channel<WatchEvent> _channel = Channel.CreateBounded<WatchEvent>(
+        new BoundedChannelOptions(2) { SingleReader = true, SingleWriter = false, FullMode = BoundedChannelFullMode.DropOldest });
 
     private readonly SemaphoreSlim _ocrGate = new(1, 1);
     private readonly object _pillGate = new();
     private NativeMethods.RECT _pillScreenRect;
     private bool _pillScreenRectValid;
     private byte[]? _pixelBuf;
+    private byte[]? _ocrPixelBuf;
 
     private OverlayWindow? _overlay;
     private Dispatcher? _dispatcher;
@@ -127,6 +128,9 @@ public sealed partial class Coordinator
     {
         _lastHash = 0;
         _hashRowBmp = null;
+        _lastLines = Array.Empty<OcrLineData>();
+        _pixelBuf = null;
+        _ocrPixelBuf = null;
         // 注意：_lastTheme 不重置 —— 同一皮肤跨组词保持取色稳定，避免每次组词首帧颜色跳变
         _lastCaptureRect = default;
         _lastCheckMs = 0;
@@ -185,7 +189,7 @@ public sealed partial class Coordinator
                     g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
                     g.DrawImage(bmp, 0, 0, w * 2, h * 2);
                 }
-                var bigBytes = GetPixels(big);
+                var bigBytes = GetPixels(big, enlarged: true);
                 _lastLines = ScaleLines(await _ocr.RecognizeAsync(bigBytes, big.Width, big.Height), 1.0 / OcrScale);
 
                 var parsed = CandidateParser.Parse(_lastLines.Select(l => l.Text).ToList());
@@ -326,8 +330,17 @@ public sealed partial class Coordinator
                 }
                 else
                 {
-                    // 这一帧没找到行/不可信：沿用上一帧行位置，避免锚点抖动
-                    _lastHasRow = _hashRowBmp.HasValue;
+                    // 仅复用同尺寸窗口内的行位置，并随窗口移动换算屏幕坐标。
+                    _lastHasRow = _hashRowBmp.HasValue && _hashRowWin.Width == w && _hashRowWin.Height == h;
+                    if (_lastHasRow)
+                    {
+                        var previousRow = _hashRowBmp!.Value;
+                        _lastRowRect = new NativeMethods.RECT
+                        {
+                            Left = rect.Left + previousRow.Left, Top = rect.Top + previousRow.Top,
+                            Right = rect.Left + previousRow.Right, Bottom = rect.Top + previousRow.Bottom,
+                        };
+                    }
                 }
 
                 var boxRect = new Rectangle(0, 0, w, h * 40 / 100);
@@ -350,8 +363,8 @@ public sealed partial class Coordinator
             gloss = _lastGloss;
             pinyin = _lastPinyin;
             theme = _cfg.PillMode == "custom" ? CustomTheme(_lastTheme) : _lastTheme;
-            // 产品规则：悬浮条恒在搜狗输入窗（拼音框+候选行）正下方 —— 与 OCR 质量解耦，永不跑到上方
-            (anchor, anchorOffset) = (rect, 6);
+            // 贴合实际候选行下沿，避开皮肤装饰和透明留白；无可靠行坐标时回退窗口。
+            (anchor, anchorOffset) = (_lastHasRow ? _lastRowRect : rect, 0);
         }
         finally
         {
@@ -491,7 +504,7 @@ public sealed partial class Coordinator
         g.FillRectangle(System.Drawing.Brushes.White, local);
     }
 
-    private byte[] GetPixels(Bitmap bmp)
+    private byte[] GetPixels(Bitmap bmp, bool enlarged = false)
     {
         var bd = bmp.LockBits(
             new Rectangle(0, 0, bmp.Width, bmp.Height),
@@ -500,9 +513,10 @@ public sealed partial class Coordinator
         try
         {
             int need = bd.Stride * bd.Height;
-            if (_pixelBuf is null || _pixelBuf.Length < need) _pixelBuf = new byte[need];
-            Marshal.Copy(bd.Scan0, _pixelBuf, 0, need);
-            return _pixelBuf;
+            ref byte[]? buffer = ref (enlarged ? ref _ocrPixelBuf : ref _pixelBuf);
+            if (buffer is null || buffer.Length < need) buffer = new byte[need];
+            Marshal.Copy(bd.Scan0, buffer, 0, need);
+            return buffer;
         }
         finally
         {

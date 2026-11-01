@@ -23,6 +23,19 @@ public sealed class Config
     public string PillBgColor { get; set; } = "#FF2A2C30";
     public string PillFgColor { get; set; } = "#FFF2F5FA";
     public int PillOpacityPercent { get; set; } = 85;
+    public List<string> RecentColors { get; set; } = new();
+
+    public void RememberColor(string hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex)) return;
+        hex = hex.Trim().ToUpperInvariant();
+        if (hex.Length == 7) hex = "#FF" + hex[1..];
+        if (hex.Length != 9 || hex[0] != '#' || !hex[1..].All(Uri.IsHexDigit)) return;
+        RecentColors ??= new();
+        RecentColors.RemoveAll(c => string.Equals(c, hex, StringComparison.OrdinalIgnoreCase));
+        RecentColors.Insert(0, hex);
+        if (RecentColors.Count > 8) RecentColors.RemoveRange(8, RecentColors.Count - 8);
+    }
 
     // 启用的主题词包（Data/Packs/*.json 的文件名，不含扩展名）
     public List<string> EnabledPacks { get; set; } = new() { "internet", "ai", "shortdrama" };
