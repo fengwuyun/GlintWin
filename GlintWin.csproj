@@ -12,12 +12,16 @@
     <AssemblyName>GlintWin</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <Version>0.2.0</Version>
+    <Version>0.4.1</Version>
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="Data\**" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Data/cedict.json"><LogicalName>GlintWin.Bundle/Data/cedict.json</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Data/Packs/*.json"><LogicalName>GlintWin.Bundle/Data/Packs/%(Filename)%(Extension)</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Data/custom_template.csv"><LogicalName>GlintWin.Bundle/Data/custom_template.csv</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="app.ico"><LogicalName>GlintWin.Bundle/app.ico</LogicalName></EmbeddedResource>
     <None Include="app.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

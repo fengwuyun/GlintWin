@@ -21,6 +21,7 @@ public partial class App : Application
     private const string ActivateEventName = "GlintWin_ActivateUI";
     private ConsoleWindow? _mainWin;
     private bool _paused;
+    private DailyCollectionService? _daily;
     private WinForms.ToolStripMenuItem? _pauseItem;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -34,6 +35,25 @@ public partial class App : Application
             Logger.Error("appdomain: " + ea.ExceptionObject);
 
         NativeMethods.TrySetPerMonitorV2();
+        if (e.Args.Length == 2 && e.Args[0] == "--verify-package")
+        {
+            try
+            {
+                AppPaths.Initialize(e.Args[1], AppContext.BaseDirectory);
+                var checkDict = CedictDictionary.LoadAll(Config.Load());
+                var checkOcr = new OcrService("zh-Hans-CN");
+                File.WriteAllText(Path.Combine(AppPaths.Root, "package-check.json"), System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    Entries = checkDict.Count, BaseEntries = checkDict.BaseCount, OcrAvailable = checkOcr.Available,
+                    DefaultCollectionEnabled = new Config().AutoCollectDailyInput,
+                    Runtime = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
+                    Resources = typeof(AppPaths).Assembly.GetManifestResourceNames().Length
+                }));
+                Shutdown(checkDict.BaseCount > 100000 ? 0 : 2);
+            }
+            catch { Shutdown(3); }
+            return;
+        }
 
         _mutex = new Mutex(true, "GlintWin_SingleInstance", out var createdNew);
         if (!createdNew)
@@ -51,10 +71,12 @@ public partial class App : Application
         }
         _activateEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivateEventName);
 
+        try { AppPaths.Initialize(); }
+        catch (Exception ex) { MessageBox.Show("无法准备 GlintWin 用户数据目录：" + ex.Message, "GlintWin"); Shutdown(1); return; }
         Logger.Init();
         var cfg = Config.Load();
         _config = cfg;
-        var dict = CedictDictionary.Load(Path.Combine(AppContext.BaseDirectory, cfg.DictionaryPath));
+        var dict = CedictDictionary.LoadAll(cfg);
         ConsoleWindow.LastThemeProvider = () => _coordinator?.LastTheme;
         ConsoleWindow.DictionaryInfoText = dict != null
             ? $"{dict.Count:N0} 条 · CC-CEDICT（含拼音）"
@@ -62,6 +84,15 @@ public partial class App : Application
 
         _coordinator = new Coordinator(cfg, dict);
         _coordinator.Start(Dispatcher);
+        try
+        {
+            _daily = new DailyCollectionService(cfg, () => _paused);
+            _coordinator.CandidateObserved = _daily.Observe;
+            _coordinator.CandidatesObserved = _daily.ObserveCandidates;
+            _coordinator.CompositionHidden = _daily.Cancel;
+        }
+        catch (Exception ex) { Logger.Error("daily store unavailable: " + ex.Message); }
+        ConsoleWindow.RuntimeStatusText = _coordinator.OcrAvailable ? "离线 OCR 已就绪" : "缺少中文 OCR：请在 Windows 语言设置安装简体中文 OCR 功能";
 
         _cts = new CancellationTokenSource();
         PinyinTracker.Start();
@@ -98,7 +129,7 @@ public partial class App : Application
 
         // 启动即打开主界面（-tray 用于开机自启静默；--ui 强制打开；首次运行强制打开）
         bool startMinimized = e.Args.Any(a => string.Equals(a, "-tray", StringComparison.OrdinalIgnoreCase));
-        bool firstRun = !File.Exists(Path.Combine(AppContext.BaseDirectory, "config.json"));
+        bool firstRun = !File.Exists(AppPaths.ConfigFile);
         if (e.Args.Contains("--ui") || firstRun || !startMinimized)
         {
             Dispatcher.InvokeAsync(OpenMain);
@@ -107,7 +138,7 @@ public partial class App : Application
 
     private void SetupTray()
     {
-        var iconPath = Path.Combine(AppContext.BaseDirectory, "app.ico");
+        var iconPath = Path.Combine(AppPaths.Root, "app.ico");
         _tray = new WinForms.NotifyIcon
         {
             Icon = File.Exists(iconPath)
@@ -125,6 +156,7 @@ public partial class App : Application
         _pauseItem.Click += (s, ev) =>
         {
             _paused = !_paused;
+            _daily?.RefreshEnabled();
             _pauseItem.Text = _paused ? "恢复" : "暂停";
             _watcher?.SetPaused(_paused);
             _mspWatcher?.SetPaused(_paused);
@@ -160,7 +192,7 @@ public partial class App : Application
             _mainWin.Activate();
             return;
         }
-        _mainWin = new ConsoleWindow(_config, () => _coordinator?.Dictionary, ReloadDictionary);
+        _mainWin = new ConsoleWindow(_config, () => _coordinator?.Dictionary, ReloadDictionary, _daily);
         _mainWin.Closed += (_, _) => _mainWin = null;
         _mainWin.Show();
     }
@@ -169,12 +201,13 @@ public partial class App : Application
     {
         try { _cts?.Cancel(); } catch { }
         try { if (_tray != null) { _tray.Visible = false; _tray.Dispose(); } } catch { }
-        Environment.Exit(0);
+        _mainWin?.Close();
+        Shutdown();
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
-        try { _tray?.Dispose(); } catch { }
+        try { _cts?.Cancel(); _daily?.Dispose(); _tray?.Dispose(); } catch { }
         base.OnExit(e);
     }
 }

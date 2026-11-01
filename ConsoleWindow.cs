@@ -36,7 +36,7 @@ namespace GlintWin;
 /// 可视化控制台（深色 Fluent 风格）：左侧导航 + 四页内容。
 /// 状态总览 / 悬浮条外观（调色盘 + HSV 取色器 + 实时预览）/ 词库管理（主题词包 + 自定义词库）/ 通用设置。
 /// </summary>
-public sealed class ConsoleWindow : Window
+public sealed partial class ConsoleWindow : Window
 {
     /// <summary>App 注入：取最近一次皮肤取色主题，供「自动」模式预览。</summary>
     public static Func<SkinTheme?>? LastThemeProvider { get; set; }
@@ -45,6 +45,8 @@ public sealed class ConsoleWindow : Window
     public static string? DictionaryInfoText { get; set; }
 
     private readonly Config _cfg;
+    private readonly DailyCollectionService? _daily;
+    public static string RuntimeStatusText { get; set; } = "离线 OCR 状态待检查";
     private readonly Func<CedictDictionary?> _dictProvider;
     private readonly Action _reloadDictionary;
     private readonly ContentControl _pageHost = new();
@@ -86,8 +88,9 @@ public sealed class ConsoleWindow : Window
     private static readonly Brush FgSubBrush = new SolidColorBrush(Color.FromRgb(0x9C, 0xA0, 0xAD));
     private static readonly Brush LineBrush = new SolidColorBrush(Color.FromRgb(0x2C, 0x30, 0x3B));
 
-    public ConsoleWindow(Config cfg, Func<CedictDictionary?> dictProvider, Action reloadDictionary)
+    public ConsoleWindow(Config cfg, Func<CedictDictionary?> dictProvider, Action reloadDictionary, DailyCollectionService? daily = null)
     {
+        _daily = daily;
         _cfg = cfg;
         _dictProvider = dictProvider;
         _reloadDictionary = reloadDictionary;
@@ -172,13 +175,14 @@ public sealed class ConsoleWindow : Window
         sp.Children.Add(NavItem("look", "\uE790", "悬浮条外观"));
         sp.Children.Add(NavLabel("词库"));
         sp.Children.Add(NavItem("dict", "\uE8A5", "词库管理"));
+        sp.Children.Add(NavItem("daily", "\uE787", "每日词汇"));
         sp.Children.Add(NavLabel("系统"));
         sp.Children.Add(NavItem("settings", "\uE713", "通用设置"));
 
         sp.Children.Add(new Border { Height = 1, Background = LineBrush, Margin = new Thickness(8, 14, 8, 10), Opacity = 0.5 });
         sp.Children.Add(new TextBlock
         {
-            Text = "v0.3 · 全离线处理\n按键仅识别拼音，不上传",
+            Text = "v0.4.1 · 全离线处理\n每日采集可选 · 不上传",
             FontSize = 11,
             Foreground = FgSubBrush,
             Margin = new Thickness(8, 0, 0, 0),
@@ -263,6 +267,7 @@ public sealed class ConsoleWindow : Window
             _svThumb = _hueThumb = null; _svFill = null;
             _tgtBgBtn = _tgtFgBtn = null; _recentColors = null;
         }
+        if (key != "daily") { _dailyRequest++; _dailyGrid = null; }
         _activePage = key;
         foreach (var (item, accent, labelTb, glyphTb, k) in _navItems)
         {
@@ -276,6 +281,7 @@ public sealed class ConsoleWindow : Window
         {
             "look" => BuildLookPage(),
             "dict" => BuildDictPage(),
+            "daily" => BuildDailyPage(),
             "settings" => BuildSettingsPage(),
             _ => BuildStatusPage(),
         };
@@ -384,7 +390,7 @@ public sealed class ConsoleWindow : Window
 
         var statusCard = Card(VStack(
             new TextBlock { Text = "● 监控中", Foreground = new SolidColorBrush(Color.FromRgb(0x4C, 0xC3, 0x6F)), FontWeight = FontWeights.SemiBold },
-            new TextBlock { Text = "搜狗通道（窗口锚定）+ 微软拼音通道（光标锚定 OCR）", Foreground = FgSubBrush, Margin = new Thickness(0, 6, 0, 0) },
+            new TextBlock { Text = RuntimeStatusText, Foreground = FgSubBrush, Margin = new Thickness(0, 6, 0, 0) },
             new TextBlock { Text = "悬浮条跟随输入法皮肤取色，释义全离线查询，按键仅识别拼音不上传", Foreground = FgSubBrush, Margin = new Thickness(0, 2, 0, 0) }));
 
         var dictCard = Card(VStack(
@@ -721,7 +727,7 @@ public sealed class ConsoleWindow : Window
         };
         foreach (var (id, name) in builtin)
         {
-            var file = Path.Combine(AppContext.BaseDirectory, "Data", "Packs", id + ".json");
+            var file = Path.Combine(AppPaths.Root, "Data", "Packs", id + ".json");
             int count = 0;
             try { if (File.Exists(file)) count = CountJsonEntries(file); } catch { }
             var on = _cfg.EnabledPacks.Contains(id, StringComparer.OrdinalIgnoreCase);
@@ -878,8 +884,8 @@ public sealed class ConsoleWindow : Window
 
         sp.Children.Add(Card(VStack(
             CardTitle("关于"),
-            new TextBlock { Text = "GlintWin v0.3 — 输入中文，顺手看见英文。", Foreground = FgBrush, Margin = new Thickness(0, 0, 0, 4) },
-            new TextBlock { Text = "全离线：无网络请求、无进程注入；按键仅实时识别拼音，不存储不上传。", Foreground = FgSubBrush, Margin = new Thickness(0, 0, 0, 4) },
+            new TextBlock { Text = "GlintWin v0.4.1 — 输入中文，顺手看见英文。", Foreground = FgBrush, Margin = new Thickness(0, 0, 0, 4) },
+            new TextBlock { Text = "全离线运行，不上传输入。每日词汇默认关闭，开启后仅本地保存待核对词条。", Foreground = FgSubBrush, Margin = new Thickness(0, 0, 0, 4) },
             new TextBlock { Text = "词典：CC-CEDICT（CC-BY-SA 4.0）+ 主题词包 + 自定义词库。", Foreground = FgSubBrush })));
 
         var btnLogs = FlatButton("打开日志文件夹", () =>
@@ -1044,7 +1050,7 @@ public sealed class ConsoleWindow : Window
     {
         try
         {
-            var p = Path.Combine(AppContext.BaseDirectory, "app.ico");
+            var p = Path.Combine(AppPaths.Root, "app.ico");
             if (File.Exists(p))
                 Icon = System.Windows.Media.Imaging.BitmapFrame.Create(new Uri(p));
         }

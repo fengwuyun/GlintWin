@@ -52,7 +52,7 @@ public sealed class MspWatcher
                 else if (lastVisible)
                 {
                     lastVisible = false;
-                    Event?.Invoke(new WatchEvent(false, default));
+                    Event?.Invoke(new WatchEvent(false, default, RequireNumbered: true));
                 }
             }
             catch (Exception ex)

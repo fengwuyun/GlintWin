@@ -21,6 +21,17 @@ public sealed partial class Coordinator
     private const double OcrScale = 2.0;   // 小字放大后再识别，显著提升准确率
 
     private readonly Config _cfg;
+    private readonly PositionStabilizer _position = new();
+    private readonly object _watchGate = new();
+    private WatchEvent _latestWatch;
+    private long _watchVersion;
+    private bool? _activeSource;
+    private bool _lastFrameTrusted;
+    public Action<string, string, string?, long, long>? CandidateObserved { get; set; }
+    private IReadOnlyList<(string Word, string? Meaning)>? _lastChoices;
+    public Action<IReadOnlyList<(string Word, string? Meaning)>, string, long, long>? CandidatesObserved { get; set; }
+    public Action? CompositionHidden { get; set; }
+    public bool OcrAvailable => _ocr.Available;
     private readonly OcrService _ocr;
     private CedictDictionary? _dict;
     private readonly Channel<WatchEvent> _channel = Channel.CreateBounded<WatchEvent>(
@@ -76,7 +87,18 @@ public sealed partial class Coordinator
         _ = Task.Run(ConsumeAsync);
     }
 
-    public void Post(WatchEvent e) => _channel.Writer.TryWrite(e);
+    public void Post(WatchEvent e)
+    {
+        lock (_watchGate)
+        {
+            // A retiring input-method channel must not hide the other active channel.
+            if (!e.Visible && _latestWatch.Visible && e.RequireNumbered != _latestWatch.RequireNumbered) return;
+            if (e != _latestWatch) _watchVersion++;
+            _latestWatch = e;
+            _channel.Writer.TryWrite(e);
+        }
+    }
+    private bool IsCurrent(long version) { lock (_watchGate) return version == _watchVersion; }
 
     /// <summary>最近一次皮肤取色结果（设置窗口预览用）。</summary>
     public SkinTheme? LastTheme => _lastTheme;
@@ -98,9 +120,20 @@ public sealed partial class Coordinator
             {
                 try
                 {
+                    long version;
+                    lock (_watchGate) { if (e != _latestWatch) continue; version = _watchVersion; }
+                    if (_activeSource != e.RequireNumbered)
+                    {
+                        ResetTransient();
+                        _pillVisible = false;
+                        await OnUi(() => _overlay!.HidePill());
+                        CompositionHidden?.Invoke();
+                        _activeSource = e.RequireNumbered;
+                    }
                     if (!e.Visible)
                         {
                             ResetTransient();
+                            CompositionHidden?.Invoke();
                             if (_pillVisible)
                             {
                                 _pillVisible = false;
@@ -110,7 +143,7 @@ public sealed partial class Coordinator
                             continue;
                         }
                     if (!_ocr.Available) continue;
-                    await ProcessRectAsync(e.Rect, e.RequireNumbered);
+                    await ProcessRectAsync(e.Rect, e.RequireNumbered, version);
                 }
                 catch (Exception ex)
                 {
@@ -127,6 +160,11 @@ public sealed partial class Coordinator
     private void ResetTransient()
     {
         _lastHash = 0;
+        _position.Reset();
+        _lastHasRow = false;
+        _lastFrameTrusted = false;
+        _lastChoices = null;
+        _lastTop = _lastGloss = _lastPinyin = null;
         _hashRowBmp = null;
         _lastLines = Array.Empty<OcrLineData>();
         _pixelBuf = null;
@@ -142,7 +180,7 @@ public sealed partial class Coordinator
         _lastGoodParse = DateTime.MinValue;
     }
 
-    private async Task ProcessRectAsync(NativeMethods.RECT rect, bool strict)
+    private async Task ProcessRectAsync(NativeMethods.RECT rect, bool strict, long watchVersion)
     {
         int w = rect.Right - rect.Left;
         int h = rect.Bottom - rect.Top;
@@ -156,6 +194,9 @@ public sealed partial class Coordinator
         _lastCaptureRect = rect;
         _lastCheckMs = nowMs;
 
+        string? inputAtCapture = PinyinTracker.CurrentPinyin;
+        long revisionAtCapture = PinyinTracker.Revision;
+        long foregroundAtCapture = NativeMethods.GetForegroundWindow().ToInt64();
         bool hashChanged;
         string? top, gloss, pinyin;
         NativeMethods.RECT anchor;
@@ -203,8 +244,7 @@ public sealed partial class Coordinator
                     if (enhanced.Count > 0)
                     {
                         _lastPinyin = CandidateParser.Parse(enhanced).Pinyin;
-                        if (_lastPinyin != null)
-                            Logger.Info($"pinyin(enhanced)={_lastPinyin}");
+
                     }
                 }
 
@@ -252,7 +292,6 @@ public sealed partial class Coordinator
                             (int)(x2.Value - rowRectBmp.Value.X - 2),
                             rowRectBmp.Value.Height + 4);
                         var enhanced1 = await _ocr.RecognizeEnhancedAsync(bmp, crop);
-                        Logger.Info($"first-item crop=({crop.X},{crop.Y},{crop.Width},{crop.Height}) lines=[{string.Join(" / ", enhanced1)}]");
                         var cand = enhanced1.Count > 0 ? CandidateParser.ExtractTop(string.Join(" ", enhanced1)) : null;
                         if (!string.IsNullOrEmpty(cand))
                         {
@@ -315,32 +354,20 @@ public sealed partial class Coordinator
                 _lastGloss = resolvedGloss;
 
                 var rowBmp = rowLine is null || !frameTrusted ? null : LineRect(rowLine);
+                _lastFrameTrusted = frameTrusted && rowBmp.HasValue && resolvedTop != null;
+                _lastChoices = null;
+                if (_lastFrameTrusted && rowLine != null && chunks.Count > 1 && chunks[0] == resolvedTop)
+                {
+                    // Only expose numbered choices when explicit sequential markers agree with chunk count.
+                    var markers = Regex.Matches(rowLine.Text, @"(?:^|\s)([1-9])\s*[.．、]\s*")
+                        .Select(m => int.Parse(m.Groups[1].Value)).ToArray();
+                    if (markers.Length == chunks.Count && markers.SequenceEqual(Enumerable.Range(1, chunks.Count)))
+                        _lastChoices = chunks.Select(word => (word, _dict?.Lookup(word))).ToArray();
+                }
                 if (rowBmp.HasValue)
                 {
-                    _lastRowRect = new NativeMethods.RECT
-                    {
-                        Left = rect.Left + rowBmp.Value.X,
-                        Top = rect.Top + rowBmp.Value.Y,
-                        Right = rect.Left + rowBmp.Value.X + rowBmp.Value.Width,
-                        Bottom = rect.Top + rowBmp.Value.Y + rowBmp.Value.Height,
-                    };
-                    _lastHasRow = true;
                     _hashRowBmp = rowBmp;
                     _hashRowWin = new Size(w, h);
-                }
-                else
-                {
-                    // 仅复用同尺寸窗口内的行位置，并随窗口移动换算屏幕坐标。
-                    _lastHasRow = _hashRowBmp.HasValue && _hashRowWin.Width == w && _hashRowWin.Height == h;
-                    if (_lastHasRow)
-                    {
-                        var previousRow = _hashRowBmp!.Value;
-                        _lastRowRect = new NativeMethods.RECT
-                        {
-                            Left = rect.Left + previousRow.Left, Top = rect.Top + previousRow.Top,
-                            Right = rect.Left + previousRow.Right, Bottom = rect.Top + previousRow.Bottom,
-                        };
-                    }
                 }
 
                 var boxRect = new Rectangle(0, 0, w, h * 40 / 100);
@@ -354,23 +381,30 @@ public sealed partial class Coordinator
                 }
                 _lastTheme = SmoothTheme(_lastTheme, sampled);
 
-                var themeInfo = _lastTheme != null
-                    ? $"{_lastTheme.Bg}/{_lastTheme.Fg}/h{_lastTheme.RowTextHeightPx:F0}"
-                    : "default";
-                Logger.Info($"top={_lastTop} gloss={_lastGloss} strict={strict} chunks=[{string.Join("|", chunks)}] pinyin={_lastPinyin} theme={themeInfo} lines=[{string.Join(" / ", _lastLines.Select(l => l.Text))}]");
+
             }
             top = _lastTop;
             gloss = _lastGloss;
             pinyin = _lastPinyin;
             theme = _cfg.PillMode == "custom" ? CustomTheme(_lastTheme) : _lastTheme;
             // 贴合实际候选行下沿，避开皮肤装饰和透明留白；无可靠行坐标时回退窗口。
-            (anchor, anchorOffset) = (_lastHasRow ? _lastRowRect : rect, 0);
+            if (_lastFrameTrusted && _hashRowBmp.HasValue && _hashRowWin.Width == w && _hashRowWin.Height == h)
+                _position.Observe(_hashRowBmp.Value, w, h, nowMs);
+            _lastHasRow = _position.TryGet(rect, nowMs, out _lastRowRect);
+            (anchor, anchorOffset) = (_lastRowRect, 0);
         }
         finally
         {
             _ocrGate.Release();
         }
 
+        // OCR may finish after the candidate window moved or disappeared; do not flash stale coordinates.
+        if (!IsCurrent(watchVersion)) return;
+        if (!_lastHasRow)
+        {
+            if (_pillVisible) { _pillVisible = false; await OnUi(() => _overlay!.HidePill()); }
+            return;
+        }
         if (string.IsNullOrEmpty(top))
         {
             // 组词中偶发解析失败：短时间内保持原样，不闪隐
@@ -396,12 +430,21 @@ public sealed partial class Coordinator
             _pendingTop = null;
         }
 
+        if (_lastFrameTrusted && inputAtCapture != null && revisionAtCapture == PinyinTracker.Revision
+            && foregroundAtCapture == NativeMethods.GetForegroundWindow().ToInt64())
+        {
+            if (_lastChoices != null)
+                CandidatesObserved?.Invoke(_lastChoices, inputAtCapture, foregroundAtCapture, nowMs);
+            else CandidateObserved?.Invoke(top!, inputAtCapture, gloss, foregroundAtCapture, nowMs);
+        }
+
         // 内容没变就不重绘（主题平滑后微小色差也不重绘），位置照常跟随
         bool contentChanged = top != _shownTop || gloss != _shownGloss || pinyin != _shownPinyin;
         bool themeChanged = ThemeDiffers(theme, _shownTheme);
         _pillVisible = true;
         await OnUi(() =>
         {
+            if (!IsCurrent(watchVersion)) return;
             if (contentChanged || themeChanged)
             {
                 _overlay!.Update(top!, gloss, pinyin, theme);
@@ -446,7 +489,6 @@ public sealed partial class Coordinator
                 var fixedGloss = _dict.Lookup(fixedWord);
                 if (fixedGloss != null)
                 {
-                    Logger.Info($"fuzzy: {top} -> {fixedWord} (pinyin={hint})");
                     if (strict && !PinyinCompatibleWithKeyboard(fixedWord)) return (null, null);
                     return (fixedWord, fixedGloss);
                 }

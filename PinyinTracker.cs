@@ -14,6 +14,10 @@ public static class PinyinTracker
     private static readonly object Gate = new();
     private static readonly StringBuilder Buffer = new();
     private static long _lastKeyTicks;
+    private static long _revision;
+    public static long Revision => Interlocked.Read(ref _revision);
+    public static event Action<int, string, long, long>? CandidateConfirmed;
+    public static event Action? CompositionInvalidated;
     private static IntPtr _hook;
     private static bool _started;
     private static volatile bool _paused;
@@ -79,7 +83,7 @@ public static class PinyinTracker
     public static void SetPaused(bool paused)
     {
         _paused = paused;
-        if (paused) Clear();
+        if (paused) { CompositionInvalidated?.Invoke(); Clear(); }
     }
 
     /// <summary>1500ms 内有字母输入（组词进行中）。</summary>
@@ -102,6 +106,7 @@ public static class PinyinTracker
 
     private static void Clear()
     {
+        Interlocked.Increment(ref _revision);
         lock (Gate)
         {
             Buffer.Clear();
@@ -124,10 +129,13 @@ public static class PinyinTracker
                     bool alt = (GetAsyncKeyState(0x12) & 0x8000) != 0;
                     if (ctrl || alt)
                     {
+                        CompositionInvalidated?.Invoke();
                         Clear();
                     }
                     else if (vk is >= 0x41 and <= 0x5A)
                     {
+                        CompositionInvalidated?.Invoke();
+                        Interlocked.Increment(ref _revision);
                         lock (Gate)
                         {
                             if (Buffer.Length < 24) Buffer.Append((char)('a' + (vk - 0x41)));
@@ -136,14 +144,26 @@ public static class PinyinTracker
                     }
                     else if (vk == 0x08) // 退格：撤掉最后一个字母
                     {
+                        CompositionInvalidated?.Invoke();
+                        Interlocked.Increment(ref _revision);
                         lock (Gate)
                         {
                             if (Buffer.Length > 0) Buffer.Length--;
                             _lastKeyTicks = Environment.TickCount64;
                         }
                     }
-                    else if (vk is 0x20 or 0x0D or 0x1B) // 空格/回车/ESC：上屏或取消
+                    else if (vk == 0x20 || vk is >= 0x31 and <= 0x39)
                     {
+                        var pinyin = CurrentPinyin;
+                        if (!string.IsNullOrEmpty(pinyin))
+                            CandidateConfirmed?.Invoke(vk == 0x20 ? 1 : (int)(vk - 0x30), pinyin,
+                                NativeMethods.GetForegroundWindow().ToInt64(), Environment.TickCount64);
+                        Clear();
+                    }
+                    else if (vk is 0x0D or 0x1B or 0x09 or >= 0x21 and <= 0x28 || vk is 0xBD or 0xBB)
+                    {
+                        // Enter may commit raw pinyin. Navigation/page keys invalidate candidate indices.
+                        CompositionInvalidated?.Invoke();
                         Clear();
                     }
                 }

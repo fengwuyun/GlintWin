@@ -32,9 +32,9 @@ public sealed class CustomWord : System.ComponentModel.INotifyPropertyChanged
 /// </summary>
 public static class CustomStore
 {
-    private static string CustomPath => Path.Combine(AppContext.BaseDirectory, "Data", "custom.json");
-    public static string TemplatePath => Path.Combine(AppContext.BaseDirectory, "Data", "custom_template.csv");
-    public static string DataDir => Path.Combine(AppContext.BaseDirectory, "Data");
+    private static string CustomPath => Path.Combine(AppPaths.Root, "Data", "custom.json");
+    public static string TemplatePath => Path.Combine(AppPaths.Root, "Data", "custom_template.csv");
+    public static string DataDir => Path.Combine(AppPaths.Root, "Data");
 
     public static List<CustomWord> Load()
     {
