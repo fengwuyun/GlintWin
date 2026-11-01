@@ -47,14 +47,11 @@ public sealed class ConsoleWindow : Window
     private readonly Func<CedictDictionary?> _dictProvider;
     private readonly Action _reloadDictionary;
     private readonly ContentControl _pageHost = new();
-    private readonly List<(Border Item, string Key)> _navItems = new();
+    private readonly List<(Border Item, Border Accent, string Key)> _navItems = new();
     private string _activePage = "status";
     private readonly ObservableCollection<CustomWord> _customWords;
 
     // 外观页控件引用（跨页保持）
-    private RadioButton? _rbAuto;
-    private RadioButton? _rbCustom;
-    private StackPanel? _colorRow;
     private TextBlock? _lblBg;
     private TextBlock? _lblFg;
     private Slider? _slider;
@@ -68,6 +65,10 @@ public sealed class ConsoleWindow : Window
     private LinearGradientBrush? _svFill;
     private double _hue = 210, _sat = 0.75, _val = 0.18;
     private string _editTarget = "bg";
+    private Button? _tgtBgBtn;
+    private Button? _tgtFgBtn;
+    private Border? _autoSwitch;
+    private TextBlock? _lblAutoState;
 
     // 主题色
     private static readonly Color Accent = Color.FromRgb(0x6B, 0x8A, 0xFB);
@@ -93,6 +94,8 @@ public sealed class ConsoleWindow : Window
         MinHeight = 560;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Background = BgWindowBrush;
+        FontSize = 13.5;
+        FontFamily = new FontFamily("Segoe UI, Microsoft YaHei UI");
         TrySetIcon();
 
         var sidebar = new Border
@@ -180,10 +183,21 @@ public sealed class ConsoleWindow : Window
         var b = new Border
         {
             CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(12, 9, 12, 9),
+            Padding = new Thickness(0),
             Margin = new Thickness(0, 0, 0, 3),
             Cursor = Cursors.Hand,
             Background = Brushes.Transparent,
+        };
+        var accent = new Border
+        {
+            Width = 3,
+            Height = 18,
+            CornerRadius = new CornerRadius(2),
+            Background = AccentBrush,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(6, 0, 0, 0),
+            Visibility = Visibility.Collapsed,
         };
         var sp = new StackPanel { Orientation = Orientation.Horizontal };
         sp.Children.Add(new TextBlock
@@ -192,7 +206,7 @@ public sealed class ConsoleWindow : Window
             FontFamily = new FontFamily("Segoe MDL2 Assets"),
             FontSize = 15,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 10, 0),
+            Margin = new Thickness(8, 0, 10, 0),
         });
         sp.Children.Add(new TextBlock
         {
@@ -200,19 +214,30 @@ public sealed class ConsoleWindow : Window
             FontSize = 13.5,
             VerticalAlignment = VerticalAlignment.Center,
         });
-        b.Child = sp;
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(accent, 0);
+        Grid.SetColumn(sp, 1);
+        grid.Children.Add(accent);
+        grid.Children.Add(sp);
+        b.Child = grid;
+        b.Tag = accent;
         b.MouseLeftButtonUp += (_, _) => ShowPage(key);
         b.MouseEnter += (_, _) => { if (_activePage != key) b.Background = BgHoverBrush; };
         b.MouseLeave += (_, _) => { if (_activePage != key) b.Background = Brushes.Transparent; };
-        _navItems.Add((b, key));
+        _navItems.Add((b, accent, key));
         return b;
     }
 
     private void ShowPage(string key)
     {
         _activePage = key;
-        foreach (var (item, k) in _navItems)
+        foreach (var (item, accent, k) in _navItems)
+        {
             item.Background = k == key ? BgHoverBrush : Brushes.Transparent;
+            accent.Visibility = k == key ? Visibility.Visible : Visibility.Collapsed;
+        }
         _pageHost.Content = key switch
         {
             "look" => BuildLookPage(),
@@ -259,8 +284,8 @@ public sealed class ConsoleWindow : Window
         BorderBrush = LineBrush,
         BorderThickness = new Thickness(1),
         CornerRadius = new CornerRadius(10),
-        Padding = new Thickness(16),
-        Margin = new Thickness(0, 0, 0, 14),
+        Padding = new Thickness(18, 14, 18, 16),
+        Margin = new Thickness(0, 0, 0, 12),
         Child = content,
     };
 
@@ -309,14 +334,31 @@ public sealed class ConsoleWindow : Window
     {
         var sp = VStack(PageTitle("悬浮条外观"));
 
-        _rbAuto = new RadioButton { GroupName = "mode", Content = "自动（跟随输入法皮肤取色）", Foreground = FgBrush };
-        _rbCustom = new RadioButton { GroupName = "mode", Content = "自定义颜色", Foreground = FgBrush, Margin = new Thickness(0, 6, 0, 0) };
-        _rbAuto.Checked += (_, _) => { _cfg.PillMode = "auto"; SaveCfg(); if (_colorRow != null) _colorRow.IsEnabled = false; RefreshLook(); };
-        _rbCustom.Checked += (_, _) => { _cfg.PillMode = "custom"; SaveCfg(); if (_colorRow != null) _colorRow.IsEnabled = true; RefreshLook(); };
-        var modeCard = Card(VStack(CardTitle("取色模式"), _rbAuto, _rbCustom,
-            _lblBg = new TextBlock { Foreground = FgSubBrush, Margin = new Thickness(0, 8, 0, 0) },
-            _lblFg = new TextBlock { Foreground = FgSubBrush }));
-        sp.Children.Add(modeCard);
+        // 跟随皮肤开关（关 = 自定义颜色）
+        var autoRow = new StackPanel { Orientation = Orientation.Horizontal };
+        _lblAutoState = new TextBlock
+        {
+            Text = "跟随皮肤自动取色",
+            Foreground = FgBrush,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(10, 0, 0, 0),
+        };
+        _autoSwitch = MakeSwitch(!string.Equals(_cfg.PillMode, "custom", StringComparison.OrdinalIgnoreCase), v =>
+        {
+            _cfg.PillMode = v ? "auto" : "custom";
+            SaveCfg();
+            if (_lblAutoState != null) _lblAutoState.Text = v ? "跟随皮肤自动取色" : "自定义颜色";
+            RefreshLook();
+        });
+        autoRow.Children.Add(_autoSwitch);
+        autoRow.Children.Add(_lblAutoState);
+        sp.Children.Add(Card(VStack(CardTitle("取色模式"), autoRow,
+            new TextBlock { Text = "开启后悬浮条颜色实时跟随输入法皮肤；关闭后使用下方自定义颜色。", Foreground = FgSubBrush, FontSize = 11.5 })));
+
+        var tgtBg = FlatButton("底色", () => SetEditTarget("bg"));
+        var tgtFg = FlatButton("文字色", () => SetEditTarget("fg"));
+        _tgtBgBtn = tgtBg;
+        _tgtFgBtn = tgtFg;
 
         var paletteWrap = new WrapPanel();
         foreach (var p in Palettes)
@@ -353,9 +395,8 @@ public sealed class ConsoleWindow : Window
             };
             paletteWrap.Children.Add(sw);
         }
-        sp.Children.Add(Card(VStack(CardTitle("调色盘（点击即用，自动切到自定义模式）"), paletteWrap)));
 
-        sp.Children.Add(Card(BuildPicker()));
+        BuildPicker(out var svBoxEl, out var hueGridEl);
 
         _slider = new Slider { Minimum = 40, Maximum = 100, Width = 320, VerticalAlignment = VerticalAlignment.Center };
         _lblOpacity = new TextBlock { Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = FgBrush };
@@ -368,27 +409,146 @@ public sealed class ConsoleWindow : Window
         var sliderRow = new StackPanel { Orientation = Orientation.Horizontal };
         sliderRow.Children.Add(_slider);
         sliderRow.Children.Add(_lblOpacity);
-        sp.Children.Add(Card(VStack(CardTitle("不透明度"), sliderRow)));
+
+        var colorCard = Card(VStack(
+            new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 12), Children = { tgtBg, tgtFg } },
+            new TextBlock { Text = "调色盘", Foreground = FgSubBrush, FontSize = 11.5, Margin = new Thickness(0, 0, 0, 6) },
+            paletteWrap,
+            new TextBlock { Text = "精细取色", Foreground = FgSubBrush, FontSize = 11.5, Margin = new Thickness(0, 12, 0, 6) },
+            svBoxEl,
+            new StackPanel { Margin = new Thickness(0, 12, 0, 0), Children = { hueGridEl } },
+            _lblBg,
+            _lblFg,
+            new TextBlock { Text = "不透明度", Foreground = FgSubBrush, FontSize = 11.5, Margin = new Thickness(0, 12, 0, 6) },
+            sliderRow));
+        sp.Children.Add(colorCard);
 
         _previewText = new TextBlock
         {
             Text = "学习   learn · study",
             FontFamily = new FontFamily("Microsoft YaHei UI"),
-            FontSize = 14,
+            FontSize = 15,
         };
         _previewBorder = new Border
         {
             CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(14, 7, 14, 8),
+            Padding = new Thickness(16, 8, 16, 9),
             HorizontalAlignment = HorizontalAlignment.Center,
             Child = _previewText,
         };
-        sp.Children.Add(Card(VStack(CardTitle("实时预览（棋盘格代表应用背景）"),
-            new Border { Background = CheckerBrush(), Padding = new Thickness(2), Child = _previewBorder })));
+        var checker = new Border
+        {
+            Background = CheckerBrush(),
+            Padding = new Thickness(2),
+            MinHeight = 72,
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = _previewBorder,
+        };
+        sp.Children.Add(Card(VStack(CardTitle("实时预览（棋盘格代表应用背景）"), checker)));
 
         var page = PageScroll(sp);
         LoadLookFromCfg();
         return page;
+    }
+
+    private void SetEditTarget(string t)
+    {
+        _editTarget = t;
+        if (_tgtBgBtn != null)
+            _tgtBgBtn.Background = new SolidColorBrush(t == "bg" ? Accent : Color.FromRgb(0x35, 0x35, 0x3D));
+        if (_tgtFgBtn != null)
+            _tgtFgBtn.Background = new SolidColorBrush(t == "fg" ? Accent : Color.FromRgb(0x35, 0x35, 0x3D));
+    }
+
+    private void BuildPicker(out UIElement svBoxEl, out UIElement hueGridEl)
+    {
+        _svBox = new Border
+        {
+            Width = 240,
+            Height = 160,
+            CornerRadius = new CornerRadius(6),
+            Cursor = Cursors.Cross,
+        };
+        var svGrid = new Grid();
+        _svFill = new LinearGradientBrush
+        {
+            StartPoint = new Point(0, 0),
+            EndPoint = new Point(1, 0),
+            GradientStops = { new GradientStop(Colors.White, 0), new GradientStop(Colors.White, 1) },
+        };
+        svGrid.Children.Add(new System.Windows.Shapes.Rectangle { Fill = _svFill });
+        svGrid.Children.Add(new System.Windows.Shapes.Rectangle
+        {
+            Fill = new LinearGradientBrush
+            {
+                StartPoint = new Point(0, 0),
+                EndPoint = new Point(0, 1),
+                GradientStops =
+                {
+                    new GradientStop(Color.FromArgb(0, 0, 0, 0), 0),
+                    new GradientStop(Colors.Black, 1),
+                },
+            },
+        });
+        _svThumb = new Ellipse
+        {
+            Width = 12,
+            Height = 12,
+            Stroke = Brushes.White,
+            StrokeThickness = 2,
+            Fill = Brushes.Transparent,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(-6, -6, 0, 0),
+        };
+        var svCanvas = new Canvas { ClipToBounds = true, Children = { _svThumb } };
+        svGrid.Children.Add(svCanvas);
+        _svBox.Child = svGrid;
+        _svBox.MouseLeftButtonDown += (_, e) => { _svBox.CaptureMouse(); PickSv(e.GetPosition(_svBox)); };
+        _svBox.MouseMove += (_, e) => { if (_svBox.IsMouseCaptured) PickSv(e.GetPosition(_svBox)); };
+        _svBox.MouseLeftButtonUp += (_, _) => _svBox.ReleaseMouseCapture();
+
+        _hueBar = new Border
+        {
+            Width = 240,
+            Height = 14,
+            CornerRadius = new CornerRadius(7),
+            Cursor = Cursors.Hand,
+            Background = new LinearGradientBrush
+            {
+                StartPoint = new Point(0, 0),
+                EndPoint = new Point(1, 0),
+                GradientStops =
+                {
+                    new GradientStop(Color.FromRgb(0xFF, 0x00, 0x00), 0),
+                    new GradientStop(Color.FromRgb(0xFF, 0xFF, 0x00), 0.17),
+                    new GradientStop(Color.FromRgb(0x00, 0xFF, 0x00), 0.33),
+                    new GradientStop(Color.FromRgb(0x00, 0xFF, 0xFF), 0.5),
+                    new GradientStop(Color.FromRgb(0x00, 0x00, 0xFF), 0.67),
+                    new GradientStop(Color.FromRgb(0xFF, 0x00, 0xFF), 0.83),
+                    new GradientStop(Color.FromRgb(0xFF, 0x00, 0x00), 1),
+                },
+            },
+        };
+        _hueThumb = new Ellipse
+        {
+            Width = 12,
+            Height = 12,
+            Stroke = Brushes.White,
+            StrokeThickness = 2,
+            Fill = Brushes.Transparent,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(-6, 0, 0, 0),
+        };
+        var hueGrid = new Grid { Width = 240 };
+        hueGrid.Children.Add(_hueBar);
+        hueGrid.Children.Add(_hueThumb);
+        _hueBar.MouseLeftButtonDown += (_, e) => { _hueBar.CaptureMouse(); PickHue(e.GetPosition(_hueBar)); };
+        _hueBar.MouseMove += (_, e) => { if (_hueBar.IsMouseCaptured) PickHue(e.GetPosition(_hueBar)); };
+        _hueBar.MouseLeftButtonUp += (_, _) => _hueBar.ReleaseMouseCapture();
+        svBoxEl = _svBox;
+        hueGridEl = hueGrid;
     }
 
     private static readonly (string Name, string Bg, string Fg, int Opacity)[] Palettes =
@@ -573,7 +733,8 @@ public sealed class ConsoleWindow : Window
             if (_lblFg != null) _lblFg.Text = "文字 " + hex;
         }
         _cfg.PillMode = "custom";
-        if (_rbCustom != null) _rbCustom.IsChecked = true;
+        if (_autoSwitch != null) SetSwitchState(_autoSwitch, false);
+        if (_lblAutoState != null) _lblAutoState.Text = "自定义颜色";
         SaveCfg();
         RefreshLook();
     }
@@ -756,6 +917,13 @@ public sealed class ConsoleWindow : Window
         return PageScroll(sp);
     }
 
+    private static void SetSwitchState(Border track, bool on)
+    {
+        track.Tag = on;
+        track.Background = on ? AccentBrush : new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x60));
+        if (track.Child is Ellipse e) e.Margin = new Thickness(on ? 23 : 3, 0, on ? 3 : 23, 0);
+    }
+
     private Border MakeSwitch(bool isOn, Action<bool> onChange)
     {
         var thumb = new Ellipse
@@ -811,10 +979,10 @@ public sealed class ConsoleWindow : Window
     private void LoadLookFromCfg()
     {
         bool custom = string.Equals(_cfg.PillMode, "custom", StringComparison.OrdinalIgnoreCase);
-        if (_rbAuto != null) _rbAuto.IsChecked = !custom;
-        if (_rbCustom != null) _rbCustom.IsChecked = custom;
-        if (_colorRow != null) _colorRow.IsEnabled = custom;
+        if (_autoSwitch != null) SetSwitchState(_autoSwitch, !custom);
+        if (_lblAutoState != null) _lblAutoState.Text = custom ? "自定义颜色" : "跟随皮肤自动取色";
         if (_slider != null) _slider.Value = Math.Clamp(_cfg.PillOpacityPercent, 40, 100);
+        SetEditTarget(_editTarget);
         RefreshLook();
     }
 

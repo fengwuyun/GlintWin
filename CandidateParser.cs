@@ -111,7 +111,9 @@ public static partial class CandidateParser
         s = s.Replace(" ", "").Replace("\u00a0", "");
         s = LeadingNoiseRegex().Replace(s, "");
         s = TrailingNoiseRegex().Replace(s, "");
-        return s.Length > 0 && s.Length <= 16 && CjkRegex().IsMatch(s) ? s : null;
+        if (s.Length == 0 || s.Length > 16) return null;
+        if (s.Contains('|') || s.Contains('[') || s.Contains(']')) return null;   // OCR 分隔符残留
+        return CjkRegex().IsMatch(s) ? s : null;
     }
 
     /// <summary>

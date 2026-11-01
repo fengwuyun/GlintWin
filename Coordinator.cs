@@ -56,6 +56,7 @@ public sealed partial class Coordinator
     private SkinTheme? _shownTheme;
     private string? _pendingTop;      // 首显确认：连续两帧一致才让悬浮条出现
     private string? _prevFrameTop;    // 上一 OCR 帧的候选（用于 OCR 抖动去重）
+    private int _untrustedStreak;     // 连续不可信帧数（>=3 隐藏悬浮条防冻结残留）
     private DateTime _lastGoodParse = DateTime.MinValue;
     private bool _pillVisible;
 
@@ -133,6 +134,7 @@ public sealed partial class Coordinator
         _shownTheme = null;
         _pendingTop = null;
         _prevFrameTop = null;
+        _untrustedStreak = 0;
         _lastGoodParse = DateTime.MinValue;
     }
 
@@ -285,8 +287,24 @@ public sealed partial class Coordinator
                                     (rowLine is null && newTop is null);
                 if (!frameTrusted)
                 {
-                    resolvedTop = _lastTop;
-                    resolvedGloss = _lastGloss;
+                    _untrustedStreak++;
+                    if (_pillVisible && _untrustedStreak >= 3)
+                    {
+                        // 连续不可信：组词已变化但读不出候选 —— 隐藏悬浮条，避免旧值冻结残留
+                        resolvedTop = null;
+                        resolvedGloss = null;
+                        _lastTop = null;
+                        _lastGloss = null;
+                    }
+                    else
+                    {
+                        resolvedTop = _lastTop;
+                        resolvedGloss = _lastGloss;
+                    }
+                }
+                else
+                {
+                    _untrustedStreak = 0;
                 }
 
                 _lastTop = resolvedTop;
@@ -312,8 +330,9 @@ public sealed partial class Coordinator
                     _lastHasRow = _hashRowBmp.HasValue;
                 }
 
+                var boxRect = new Rectangle(0, 0, w, h * 40 / 100);
                 var sampled = !frameTrusted ? _lastTheme
-                    : rowBmp.HasValue ? SampleTheme(bytes, w, h, rowBmp) : _lastTheme;
+                    : rowBmp.HasValue ? SampleTheme(bytes, w, h, rowBmp, boxRect) : _lastTheme;
                 if (sampled is not null)
                 {
                     // 对比度归一：浅底强制深字/深底强制浅字，消除皮肤高亮淡入导致的灰色深浅抖动
@@ -331,7 +350,8 @@ public sealed partial class Coordinator
             gloss = _lastGloss;
             pinyin = _lastPinyin;
             theme = _cfg.PillMode == "custom" ? CustomTheme(_lastTheme) : _lastTheme;
-            (anchor, anchorOffset) = _lastHasRow ? (_lastRowRect, 4) : (rect, 6);
+            // 产品规则：悬浮条恒在搜狗输入窗（拼音框+候选行）正下方 —— 与 OCR 质量解耦，永不跑到上方
+            (anchor, anchorOffset) = (rect, 6);
         }
         finally
         {
@@ -616,37 +636,40 @@ public sealed partial class Coordinator
     /// 在候选行区域统计颜色：最高频色 = 背景色（皮肤）；与背景对比度足够高的最高频色 = 文字色。
     /// 置信度不足时返回 null（悬浮条保持深色主题）。
     /// </summary>
-    private SkinTheme? SampleTheme(byte[] bgra, int width, int height, Rectangle? rowRect)
+    /// <summary>
+    /// 皮肤取色：底色从不透明拼音框区域采样（固有色调，不随透底内容漂移）；
+    /// 文字色从候选行按对比度取。任一区域置信度不足时回退。
+    /// </summary>
+    private SkinTheme? SampleTheme(byte[] bgra, int width, int height, Rectangle? rowRect, Rectangle? boxRect)
     {
-        var r = rowRect ?? new Rectangle(0, height * 55 / 100, width, height * 40 / 100);
-        r = ClampRect(r, width, height);
-        if (r.Width < 20 || r.Height < 8) return null;
+        var fgRegion = ClampRect(rowRect ?? new Rectangle(0, height * 55 / 100, width, height * 45 / 100), width, height);
+        var bgRegion = ClampRect(boxRect ?? new Rectangle(0, height * 10 / 100, width, height * 40 / 100), width, height);
+        if (bgRegion.Width < 20 || bgRegion.Height < 8) return null;
 
-        var counts = new int[4096];
-        long total = 0;
-        for (int y = r.Top; y < r.Bottom; y++)
+        var bgCounts = new int[4096];
+        long bgTotal = 0;
+        for (int y = bgRegion.Top; y < bgRegion.Bottom; y++)
         {
             int baseIdx = y * width * 4;
-            for (int x = r.Left; x < r.Right; x++)
+            for (int x = bgRegion.Left; x < bgRegion.Right; x++)
             {
                 int i = baseIdx + x * 4;
-                int key = ((bgra[i + 2] >> 4) << 8) | ((bgra[i + 1] >> 4) << 4) | (bgra[i] >> 4);
-                counts[key]++;
-                total++;
+                bgCounts[((bgra[i + 2] >> 4) << 8) | ((bgra[i + 1] >> 4) << 4) | (bgra[i] >> 4)]++;
+                bgTotal++;
             }
         }
-        if (total == 0) return null;
+        if (bgTotal == 0) return null;
 
         int bgKey = 0, bgCount = 0;
-        for (int k = 0; k < counts.Length; k++)
+        for (int k = 0; k < bgCounts.Length; k++)
         {
-            if (counts[k] > bgCount)
+            if (bgCounts[k] > bgCount)
             {
-                bgCount = counts[k];
+                bgCount = bgCounts[k];
                 bgKey = k;
             }
         }
-        if (bgCount < total * 0.30) return null;   // 背景不占优 → 取色不可信
+        if (bgCount < bgTotal * 0.30) return null;   // 背景不占优 → 取色不可信
 
         Color BgFromKey(int key)
         {
@@ -654,41 +677,54 @@ public sealed partial class Coordinator
             return Color.FromRgb((byte)((rQ << 4) + 8), (byte)((gQ << 4) + 8), (byte)((bQ << 4) + 8));
         }
         var bg = BgFromKey(bgKey);
-
-        // 混入行区域中位色：最高频色常偏向高亮白，中位色带出候选栏本身的皮肤色调
         long cum = 0;
         int medKey = bgKey;
-        for (int k = 0; k < counts.Length; k++)
+        for (int k = 0; k < bgCounts.Length; k++)
         {
-            cum += counts[k];
-            if (cum >= total / 2)
+            cum += bgCounts[k];
+            if (cum >= bgTotal / 2)
             {
                 medKey = k;
                 break;
             }
         }
-        bg = LerpColor(bg, BgFromKey(medKey), 0.35);
+        bg = LerpColor(bg, BgFromKey(medKey), 0.35);   // 混入中位色，带出皮肤色调
 
-        // 文字色：频率 × 与背景的欧氏距离，取最高分
+        // 文字色：候选行区域中 频率×对比度 最高者
         Color? fg = null;
         double bestScore = 0;
-        for (int k = 0; k < counts.Length; k++)
+        if (fgRegion.Width >= 8 && fgRegion.Height >= 4)
         {
-            int c = counts[k];
-            if (c < Math.Max(8, total * 0.004)) continue;
-            var col = BgFromKey(k);
-            double d = ColorDist(col, bg);
-            if (d < 110) continue;
-            double score = c * d;
-            if (score > bestScore)
+            var fgCounts = new int[4096];
+            long fgTotal = 0;
+            for (int y = fgRegion.Top; y < fgRegion.Bottom; y++)
             {
-                bestScore = score;
-                fg = col;
+                int baseIdx = y * width * 4;
+                for (int x = fgRegion.Left; x < fgRegion.Right; x++)
+                {
+                    int i = baseIdx + x * 4;
+                    fgCounts[((bgra[i + 2] >> 4) << 8) | ((bgra[i + 1] >> 4) << 4) | (bgra[i] >> 4)]++;
+                    fgTotal++;
+                }
+            }
+            for (int k = 0; k < fgCounts.Length; k++)
+            {
+                int c = fgCounts[k];
+                if (c < Math.Max(8, fgTotal * 0.004)) continue;
+                var col = BgFromKey(k);
+                double d = ColorDist(col, bg);
+                if (d < 110) continue;
+                double score = c * d;
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    fg = col;
+                }
             }
         }
         var fgColor = fg ?? FallbackFg(bg);
 
-        return new SkinTheme(bg, fgColor, r.Height, AlphaFromCfg());
+        return new SkinTheme(bg, fgColor, fgRegion.Height, AlphaFromCfg());
     }
 
     private byte AlphaFromCfg() => (byte)Math.Clamp(_cfg.PillOpacityPercent * 255 / 100, 40, 255);
