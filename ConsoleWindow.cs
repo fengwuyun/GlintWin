@@ -102,13 +102,13 @@ public sealed class ConsoleWindow : Window
 
         var sidebar = new Border
         {
-            Width = 216,
+            Width = 232,
             Background = new SolidColorBrush(Color.FromRgb(0x17, 0x17, 0x1A)),
             Child = BuildSidebar(),
         };
 
         var root = new Grid();
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(216) });
+        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(232) });
         root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         Grid.SetColumn(sidebar, 0);
         Grid.SetColumn(_pageHost, 1);
@@ -123,7 +123,7 @@ public sealed class ConsoleWindow : Window
     {
         var sp = new StackPanel { Margin = new Thickness(14, 18, 14, 14) };
 
-        var logoRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(6, 0, 0, 20) };
+        var logoRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(8, 0, 0, 26) };
         var logo = new Border
         {
             Width = 34,
@@ -175,45 +175,45 @@ public sealed class ConsoleWindow : Window
     private static TextBlock NavLabel(string t) => new()
     {
         Text = t,
-        FontSize = 11.5,
-        Foreground = new SolidColorBrush(Color.FromRgb(0xAE, 0xB3, 0xC2)),
-        Margin = new Thickness(8, 10, 0, 6),
+        FontSize = 12,
+        Foreground = new SolidColorBrush(Color.FromRgb(0xB4, 0xB9, 0xC6)),
+        Margin = new Thickness(10, 16, 0, 8),
     };
 
     private Border NavItem(string key, string glyph, string label)
     {
         var b = new Border
         {
-            CornerRadius = new CornerRadius(8),
+            CornerRadius = new CornerRadius(9),
             Padding = new Thickness(0),
-            Margin = new Thickness(0, 0, 0, 3),
+            Margin = new Thickness(0, 0, 0, 5),
             Cursor = Cursors.Hand,
             Background = Brushes.Transparent,
         };
         var accent = new Border
         {
             Width = 3,
-            Height = 18,
+            Height = 20,
             CornerRadius = new CornerRadius(2),
             Background = AccentBrush,
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(6, 0, 0, 0),
+            Margin = new Thickness(8, 0, 0, 0),
             Visibility = Visibility.Collapsed,
         };
         var glyphTb = new TextBlock
         {
             Text = glyph,
             FontFamily = new FontFamily("Segoe MDL2 Assets"),
-            FontSize = 15,
+            FontSize = 16,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(8, 0, 10, 0),
+            Margin = new Thickness(10, 0, 12, 0),
             Foreground = NavIdleBrush,
         };
         var labelTb = new TextBlock
         {
             Text = label,
-            FontSize = 13.5,
+            FontSize = 14,
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = NavIdleBrush,
         };
