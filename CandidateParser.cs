@@ -35,10 +35,10 @@ public static partial class CandidateParser
     [GeneratedRegex(@"^\d{1,2}\s*[\.。]?")]
     private static partial Regex LeadingIndexRegex();
 
-    [GeneratedRegex(@"^[|\\/\r\n…—,，。;；:：!！\?？.\s]+")]
+    [GeneratedRegex(@"^[|\\/\r\n…—,，。;；:：!！\?？.×✕\s]+")]
     private static partial Regex LeadingNoiseRegex();
 
-    [GeneratedRegex(@"[|\\/\r\n…—,，。;；:：!！\?？.\s]+$")]
+    [GeneratedRegex(@"[|\\/\r\n…—,，。;；:：!！\?？.×✕\s]+$")]
     private static partial Regex TrailingNoiseRegex();
 
     public sealed record ParseResult(string? Pinyin, string? Top);

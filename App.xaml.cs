@@ -16,6 +16,8 @@ public partial class App : Application
     private CandidateWatcher? _watcher;
     private MspWatcher? _mspWatcher;
     private Coordinator? _coordinator;
+    private Config? _config;
+    private SettingsWindow? _settingsWin;
     private bool _paused;
     private WinForms.ToolStripMenuItem? _pauseItem;
 
@@ -34,13 +36,16 @@ public partial class App : Application
         _mutex = new Mutex(true, "GlintWin_SingleInstance", out var createdNew);
         if (!createdNew)
         {
-            MessageBox.Show("GlintWin 已在运行（请查看托盘图标）。");
+            // 已有实例在运行：静默退出（阻塞式弹窗会变成无人理会的僵尸进程）
+            Logger.Info("another instance is running, exit");
             Shutdown();
             return;
         }
 
         Logger.Init();
         var cfg = Config.Load();
+        _config = cfg;
+        SettingsWindow.LastThemeProvider = () => _coordinator?.LastTheme;
         var dict = CedictDictionary.Load(Path.Combine(AppContext.BaseDirectory, cfg.DictionaryPath));
 
         _coordinator = new Coordinator(cfg, dict);
@@ -80,6 +85,9 @@ public partial class App : Application
         };
 
         var menu = new WinForms.ContextMenuStrip();
+        var settingsItem = new WinForms.ToolStripMenuItem("设置…");
+        settingsItem.Click += (s, ev) => OpenSettings();
+        menu.Items.Add(settingsItem);
         _pauseItem = new WinForms.ToolStripMenuItem("暂停");
         _pauseItem.Click += (s, ev) =>
         {
@@ -100,6 +108,19 @@ public partial class App : Application
         _tray.ShowBalloonTip(3000, "GlintWin 已启动",
             "用搜狗打字时，候选栏下方会显示英文释义（本地离线处理，不读取正文）。",
             WinForms.ToolTipIcon.Info);
+    }
+
+    private void OpenSettings()
+    {
+        if (_config == null) return;
+        if (_settingsWin != null)
+        {
+            _settingsWin.Activate();
+            return;
+        }
+        _settingsWin = new SettingsWindow(_config);
+        _settingsWin.Closed += (_, _) => _settingsWin = null;
+        _settingsWin.Show();
     }
 
     private void ExitApp()

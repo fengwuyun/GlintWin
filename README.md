@@ -37,9 +37,12 @@
   Ctrl/Alt 组合清空），用于判断「正在组词」与拼音纠错；不记录其他按键、不持久化、不上传。
 - 无进程注入；源码可审计。
 
-## 配置（可选）
+## 配置
 
-在 exe 同目录放 `config.json`（不加则用默认值）：
+**托盘右键 → 「设置…」**：悬浮条底色模式（自动取色 / 自定义颜色）、文字色、不透明度，
+带棋盘格实时预览，「保存并关闭」写入配置即时生效。
+
+也可直接编辑 exe 同目录的 `config.json`：
 
 ```json
 {
@@ -48,11 +51,28 @@
   "FontSizeDip": 15,
   "CandidateWindowClass": "SoPY_Comp",
   "OcrLanguage": "zh-Hans-CN",
-  "DictionaryPath": "Data/cedict.json"
+  "DictionaryPath": "Data/cedict.json",
+  "PillMode": "auto",
+  "PillBgColor": "#FF2A2C30",
+  "PillFgColor": "#FFF2F5FA",
+  "PillOpacityPercent": 85
 }
 ```
 
+- `PillMode`：`auto`（跟随皮肤取色，默认）/ `custom`（使用 PillBgColor/PillFgColor）
+- `PillOpacityPercent`：40–100，透明度（皮肤候选栏本身透底，建议 80-90）
+
 日志：`%LOCALAPPDATA%\GlintWin\logs\glint-YYYYMMDD.log`（超 5MB 自动轮转 .old）
+
+## 桌面安装
+
+发布产物为单文件免安装 EXE（自带 .NET 运行时）：
+
+```
+publish\GlintWin.exe   # 连同 publish\Data\ 一起拷贝到任意目录
+```
+
+桌面快捷方式指向该 EXE 即可；开机自启：`Win+R` → `shell:startup` → 放入快捷方式。
 
 ## 更新词典
 

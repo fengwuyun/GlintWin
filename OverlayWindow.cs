@@ -84,8 +84,8 @@ public sealed class OverlayWindow : Window
         double fontSize;
         if (theme != null)
         {
-            // 半透明：皮肤候选栏本身透底，悬浮条用同色半透明才能与皮肤观感一致
-            bg = Color.FromArgb(0xD8, theme.Bg.R, theme.Bg.G, theme.Bg.B);
+            // 半透明：皮肤候选栏本身透底，悬浮条用同色半透明才能与皮肤观感一致（透明度可配置）
+            bg = Color.FromArgb(theme.Alpha, theme.Bg.R, theme.Bg.G, theme.Bg.B);
             bright = theme.Fg;
             dim = Lerp(theme.Fg, theme.Bg, 0.45);
             double scale = VisualTreeHelper.GetDpi(this).PixelsPerDip;

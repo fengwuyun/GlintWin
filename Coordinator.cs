@@ -7,8 +7,8 @@ using Color = System.Windows.Media.Color;
 
 namespace GlintWin;
 
-/// <summary>从候选行像素采样的皮肤主题：悬浮条直接沿用输入法皮肤配色。</summary>
-public sealed record SkinTheme(Color Bg, Color Fg, double RowTextHeightPx);
+/// <summary>悬浮条主题：皮肤取色（auto）或用户自定义（custom）。Alpha 控制透底程度。</summary>
+public sealed record SkinTheme(Color Bg, Color Fg, double RowTextHeightPx, byte Alpha = 216);
 
 /// <summary>
 /// 中枢：把「候选窗口可见/移动/隐藏」事件变成
@@ -75,6 +75,9 @@ public sealed partial class Coordinator
     }
 
     public void Post(WatchEvent e) => _channel.Writer.TryWrite(e);
+
+    /// <summary>最近一次皮肤取色结果（设置窗口预览用）。</summary>
+    public SkinTheme? LastTheme => _lastTheme;
 
     private async Task ConsumeAsync()
     {
@@ -206,6 +209,44 @@ public sealed partial class Coordinator
                 {
                     newTop = chunks.Count > 0 ? chunks[0] : parsed.Top;
                 }
+
+                // 第一候选高亮被 OCR 吞掉（行内无 1 序号）：对行首区域（2 序号之前）做增强识别补读，
+                // 否则整帧被拒会导致悬浮条消失/闪烁——这是搜狗通道不稳定的主要来源
+                bool firstItemRecovered = false;
+                if (!strict && rowLine != null && chunks.Count > 0 && !CandidateParser.HasMarkerOne(rowLine.Text))
+                {
+                    var rowRectBmp = LineRect(rowLine);
+                    double? x2 = null;
+                    if (rowRectBmp.HasValue)
+                    {
+                        foreach (var wd in rowLine.Words)
+                        {
+                            var txt = wd.Text.TrimStart();
+                            if (txt.Length > 0 && (txt[0] == '2' || txt[0] == '２'))
+                            {
+                                x2 = wd.X;
+                                break;
+                            }
+                        }
+                    }
+                    if (rowRectBmp.HasValue && x2.HasValue && x2.Value - rowRectBmp.Value.X > 8)
+                    {
+                        var crop = new Rectangle(
+                            rowRectBmp.Value.X,
+                            Math.Max(0, rowRectBmp.Value.Y - 2),
+                            (int)(x2.Value - rowRectBmp.Value.X - 2),
+                            rowRectBmp.Value.Height + 4);
+                        var enhanced1 = await _ocr.RecognizeEnhancedAsync(bmp, crop);
+                        Logger.Info($"first-item crop=({crop.X},{crop.Y},{crop.Width},{crop.Height}) lines=[{string.Join(" / ", enhanced1)}]");
+                        var cand = enhanced1.Count > 0 ? CandidateParser.ExtractTop(string.Join(" ", enhanced1)) : null;
+                        if (!string.IsNullOrEmpty(cand))
+                        {
+                            newTop = cand;
+                            firstItemRecovered = true;
+                        }
+                    }
+                }
+
                 var (resolvedTop, resolvedGloss) = ResolveTop(newTop, strict);
 
                 // 帧级去抖：与当前显示的词等长且仅差 1 字 = OCR 单字误读抖动，
@@ -225,9 +266,11 @@ public sealed partial class Coordinator
                 }
 
                 // 帧可信度闸门：第一候选被高亮动画吞掉时（行内无「1」序号），
-                // chunks[0] 实际是第二候选，本帧不可信 —— 保持旧值，且不污染主题/行哈希
+                // chunks[0] 实际是第二候选，本帧不可信 —— 保持旧值，且不污染主题/行哈希。
+                // 例外：行首增强补读成功（firstItemRecovered）则本帧可信
                 bool frameTrusted = resolvedTop is null ||
                                     strict ||
+                                    firstItemRecovered ||
                                     rowLine is null && resolvedTop == parsed.Top && parsed.Top is null ||
                                     (rowLine != null && CandidateParser.HasMarkerOne(rowLine.Text)) ||
                                     (rowLine is null && newTop is null);
@@ -278,7 +321,7 @@ public sealed partial class Coordinator
             top = _lastTop;
             gloss = _lastGloss;
             pinyin = _lastPinyin;
-            theme = _lastTheme;
+            theme = _cfg.PillMode == "custom" ? CustomTheme(_lastTheme) : _lastTheme;
             (anchor, anchorOffset) = _lastHasRow ? (_lastRowRect, 4) : (rect, 6);
         }
         finally
@@ -564,7 +607,7 @@ public sealed partial class Coordinator
     /// 在候选行区域统计颜色：最高频色 = 背景色（皮肤）；与背景对比度足够高的最高频色 = 文字色。
     /// 置信度不足时返回 null（悬浮条保持深色主题）。
     /// </summary>
-    private static SkinTheme? SampleTheme(byte[] bgra, int width, int height, Rectangle? rowRect)
+    private SkinTheme? SampleTheme(byte[] bgra, int width, int height, Rectangle? rowRect)
     {
         var r = rowRect ?? new Rectangle(0, height * 55 / 100, width, height * 40 / 100);
         r = ClampRect(r, width, height);
@@ -636,7 +679,23 @@ public sealed partial class Coordinator
         }
         var fgColor = fg ?? FallbackFg(bg);
 
-        return new SkinTheme(bg, fgColor, r.Height);
+        return new SkinTheme(bg, fgColor, r.Height, AlphaFromCfg());
+    }
+
+    private byte AlphaFromCfg() => (byte)Math.Clamp(_cfg.PillOpacityPercent * 255 / 100, 40, 255);
+
+
+    private SkinTheme? CustomTheme(SkinTheme? fallback)
+    {
+        var bg = ParseColor(_cfg.PillBgColor, Color.FromRgb(0x2A, 0x2C, 0x30));
+        var fg = ParseColor(_cfg.PillFgColor, Color.FromRgb(0xF2, 0xF5, 0xFA));
+        return new SkinTheme(bg, fg, fallback?.RowTextHeightPx ?? 16, AlphaFromCfg());
+    }
+
+    private static Color ParseColor(string hex, Color fallback)
+    {
+        try { return (Color)System.Windows.Media.ColorConverter.ConvertFromString(hex.Trim()); }
+        catch { return fallback; }
     }
 
     private static double ColorDist(Color a, Color b)
