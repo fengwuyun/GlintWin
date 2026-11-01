@@ -13,7 +13,7 @@ namespace GlintWin;
 /// </summary>
 public sealed class CedictDictionary
 {
-    private sealed record DictDto(
+    public sealed record DictDto(
         [property: JsonPropertyName("p")] string Pinyin,
         [property: JsonPropertyName("s")] string[] Senses);
 
@@ -21,6 +21,10 @@ public sealed class CedictDictionary
 
     private static readonly Regex ParenRegex = new(@"\([^)]*\)");
     private readonly Dictionary<string, Entry> _map;
+
+    public int BaseCount { get; private set; }
+    public int CustomCount { get; private set; }
+    public Dictionary<string, int> PackCounts { get; } = new();
 
     private CedictDictionary(Dictionary<string, Entry> map) => _map = map;
 
@@ -36,12 +40,58 @@ public sealed class CedictDictionary
                     map[kv.Key] = new Entry(kv.Value.Pinyin ?? "", kv.Value.Senses ?? Array.Empty<string>());
             }
             Logger.Info($"dictionary loaded: {map.Count} entries from {path}");
-            return new CedictDictionary(map);
+            var result = new CedictDictionary(map);
+            result.BaseCount = map.Count;
+            return result;
         }
         catch (Exception ex)
         {
             Logger.Warn("dictionary load failed: " + ex.Message);
             return null;
+        }
+    }
+
+    /// <summary>基础词典 + 启用的主题词包 + 自定义词库 合并加载（后加载者优先覆盖）。</summary>
+    public static CedictDictionary LoadAll(Config cfg)
+    {
+        var dict = Load(Path.Combine(AppContext.BaseDirectory, cfg.DictionaryPath))
+                   ?? new CedictDictionary(new Dictionary<string, Entry>(StringComparer.Ordinal));
+        dict.BaseCount = dict._map.Count;
+
+        var packDir = Path.Combine(AppContext.BaseDirectory, "Data", "Packs");
+        if (Directory.Exists(packDir))
+        {
+            foreach (var file in Directory.GetFiles(packDir, "*.json"))
+            {
+                var id = Path.GetFileNameWithoutExtension(file);
+                if (!cfg.EnabledPacks.Contains(id, StringComparer.OrdinalIgnoreCase)) continue;
+                dict.MergeFrom(file);
+                dict.PackCounts[id] = dict._map.Count - dict.BaseCount - dict.PackCounts.Values.Sum();
+            }
+        }
+
+        var customPath = Path.Combine(AppContext.BaseDirectory, "Data", "custom.json");
+        if (File.Exists(customPath))
+        {
+            dict.MergeFrom(customPath);
+            dict.CustomCount = dict._map.Count - dict.BaseCount - dict.PackCounts.Values.Sum();
+        }
+        return dict;
+    }
+
+    /// <summary>合并另一个同格式词典文件（同词覆盖，可引入新词）。</summary>
+    public void MergeFrom(string path)
+    {
+        try
+        {
+            var dto = JsonSerializer.Deserialize<Dictionary<string, DictDto>>(File.ReadAllText(path));
+            if (dto == null) return;
+            foreach (var kv in dto)
+                _map[kv.Key] = new Entry(kv.Value.Pinyin ?? "", kv.Value.Senses ?? Array.Empty<string>());
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"merge failed ({path}): " + ex.Message);
         }
     }
 

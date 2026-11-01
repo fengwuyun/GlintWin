@@ -22,7 +22,7 @@ public sealed partial class Coordinator
 
     private readonly Config _cfg;
     private readonly OcrService _ocr;
-    private readonly CedictDictionary? _dict;
+    private CedictDictionary? _dict;
     private readonly Channel<WatchEvent> _channel = Channel.CreateUnbounded<WatchEvent>(
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
 
@@ -78,6 +78,15 @@ public sealed partial class Coordinator
 
     /// <summary>最近一次皮肤取色结果（设置窗口预览用）。</summary>
     public SkinTheme? LastTheme => _lastTheme;
+
+    /// <summary>当前词典（词库管理页启用/停用词包后整体替换）。</summary>
+    public CedictDictionary? Dictionary => _dict;
+
+    public void SetDictionary(CedictDictionary? dict)
+    {
+        _dict = dict;
+        _lastHash = 0;   // 强制下一帧重新识别
+    }
 
     private async Task ConsumeAsync()
     {

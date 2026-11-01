@@ -39,15 +39,45 @@
 
 ## 主界面与配置
 
-**托盘右键 → 「打开主界面」**（首次运行也会自动打开）：
+深色 Fluent 风格控制台，左侧导航四页（**托盘右键 → 「打开主界面」**；首次运行自动打开）：
 
-- **运行状态**：双通道监控状态、词典规模、配置文件位置
-- **悬浮条外观**：底色模式（自动跟随皮肤取色 / 自定义颜色）、文字色、不透明度，
-  带棋盘格**实时预览**透底效果
-- **行为**：开机自启开关（一键写入/移除启动项）
-- **诊断**：打开日志文件夹、退出
+- **状态总览**：双通道监控状态、词典构成（基础/词包/自定义）、启用的词包
+- **悬浮条外观**：取色模式（自动跟随皮肤 / 自定义）、**9 组预设调色盘**一键换肤、
+  **HSV 可视化取色器**（色相条 + 饱和度/亮度面板，拖动即改）、不透明度滑杆、
+  棋盘格**实时预览**透底效果
+- **词库管理**：主题词包开关（**互联网热词 / AI 术语 / 短剧黑话**，各约 40 词，启停即时重载）、
+  **自定义词库管理**（表格增删改、CSV 导入导出、模板文件 `Data\custom_template.csv`）
+- **通用设置**：开机自启开关、诊断入口、关于
 
 修改即时生效；「保存配置」写入 exe 同目录 `config.json`（也可手改）：
+
+```json
+{
+  "PollIntervalMs": 40,
+  "OffsetYPx": 4,
+  "FontSizeDip": 15,
+  "CandidateWindowClass": "SoPY_Comp",
+  "OcrLanguage": "zh-Hans-CN",
+  "DictionaryPath": "Data/cedict.json",
+  "PillMode": "auto",
+  "PillBgColor": "#FF2A2C30",
+  "PillFgColor": "#FFF2F5FA",
+  "PillOpacityPercent": 85,
+  "EnabledPacks": [ "internet", "ai", "shortdrama" ]
+}
+```
+
+- `PillMode`：`auto`（跟随皮肤取色，默认）/ `custom`（使用 PillBgColor/PillFgColor）
+- `PillOpacityPercent`：40–100，透明度（皮肤候选栏本身透底，建议 80-90）
+- `EnabledPacks`：启用的主题词包，对应 `Data/Packs/*.json`
+
+### 自定义词库
+
+- 界面：词库管理页表格直接增删改，保存后即时重载（自定义词条**优先于**主词典与词包）。
+- CSV：列 `词条,拼音,释义1[,释义2,释义3]`，UTF-8（带 BOM）；模板见 `Data\custom_template.csv`。
+- 也允许把任意词包 JSON（`{"词":{"p":"拼音","s":["释义"]}}`）丢进 `Data\Packs\` 当新词包。
+
+日志：`%LOCALAPPDATA%\GlintWin\logs\glint-YYYYMMDD.log`（超 5MB 自动轮转 .old）
 
 ```json
 {

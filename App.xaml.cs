@@ -122,6 +122,15 @@ public partial class App : Application
             WinForms.ToolTipIcon.Info);
     }
 
+    internal void ReloadDictionary()
+    {
+        if (_config == null) return;
+        var dict = CedictDictionary.LoadAll(_config);
+        _coordinator?.SetDictionary(dict);
+        ConsoleWindow.DictionaryInfoText = $"基础 {dict.BaseCount:N0} + 词包 {dict.PackCounts.Values.Sum():N0} + 自定义 {dict.CustomCount:N0} 条";
+        _mainWin?.RefreshStatus();
+    }
+
     private void OpenMain()
     {
         if (_config == null) return;
@@ -130,7 +139,7 @@ public partial class App : Application
             _mainWin.Activate();
             return;
         }
-        _mainWin = new ConsoleWindow(_config);
+        _mainWin = new ConsoleWindow(_config, () => _coordinator?.Dictionary, ReloadDictionary);
         _mainWin.Closed += (_, _) => _mainWin = null;
         _mainWin.Show();
     }

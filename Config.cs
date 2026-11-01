@@ -24,6 +24,9 @@ public sealed class Config
     public string PillFgColor { get; set; } = "#FFF2F5FA";
     public int PillOpacityPercent { get; set; } = 85;
 
+    // 启用的主题词包（Data/Packs/*.json 的文件名，不含扩展名）
+    public List<string> EnabledPacks { get; set; } = new() { "internet", "ai", "shortdrama" };
+
     public static Config Load()
     {
         try
