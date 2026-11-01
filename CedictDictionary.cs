@@ -80,6 +80,9 @@ public sealed class CedictDictionary
 
     public string? PinyinOf(string word) => _map.TryGetValue(word, out var e) ? e.Pinyin : null;
 
+    /// <summary>词条总数（主界面状态展示用）。</summary>
+    public int Count => _map.Count;
+
     /// <summary>拼音归一化：仅保留小写字母（去声调数字/空格/隔音符）。</summary>
     public static string NormPinyin(string p)
     {

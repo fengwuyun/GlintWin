@@ -17,7 +17,7 @@ public partial class App : Application
     private MspWatcher? _mspWatcher;
     private Coordinator? _coordinator;
     private Config? _config;
-    private SettingsWindow? _settingsWin;
+    private ConsoleWindow? _mainWin;
     private bool _paused;
     private WinForms.ToolStripMenuItem? _pauseItem;
 
@@ -45,8 +45,11 @@ public partial class App : Application
         Logger.Init();
         var cfg = Config.Load();
         _config = cfg;
-        SettingsWindow.LastThemeProvider = () => _coordinator?.LastTheme;
         var dict = CedictDictionary.Load(Path.Combine(AppContext.BaseDirectory, cfg.DictionaryPath));
+        ConsoleWindow.LastThemeProvider = () => _coordinator?.LastTheme;
+        ConsoleWindow.DictionaryInfoText = dict != null
+            ? $"{dict.Count:N0} 条 · CC-CEDICT（含拼音）"
+            : "未加载 — 请先运行 tools\\convert_cedict.py 生成 Data\\cedict.json";
 
         _coordinator = new Coordinator(cfg, dict);
         _coordinator.Start(Dispatcher);
@@ -73,21 +76,30 @@ public partial class App : Application
         _mspThread.Start();
 
         SetupTray();
+
+        // 首次运行（无配置文件）自动打开主界面
+        if (e.Args.Contains("--ui") || !File.Exists(Path.Combine(AppContext.BaseDirectory, "config.json")))
+        {
+            Dispatcher.InvokeAsync(OpenMain);
+        }
     }
 
     private void SetupTray()
     {
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "app.ico");
         _tray = new WinForms.NotifyIcon
         {
-            Icon = System.Drawing.SystemIcons.Application,
+            Icon = File.Exists(iconPath)
+                ? new System.Drawing.Icon(iconPath, 32, 32)
+                : System.Drawing.SystemIcons.Application,
             Text = "GlintWin — 候选词英文释义",
             Visible = true,
         };
 
         var menu = new WinForms.ContextMenuStrip();
-        var settingsItem = new WinForms.ToolStripMenuItem("设置…");
-        settingsItem.Click += (s, ev) => OpenSettings();
-        menu.Items.Add(settingsItem);
+        var mainItem = new WinForms.ToolStripMenuItem("打开主界面");
+        mainItem.Click += (s, ev) => OpenMain();
+        menu.Items.Add(mainItem);
         _pauseItem = new WinForms.ToolStripMenuItem("暂停");
         _pauseItem.Click += (s, ev) =>
         {
@@ -110,17 +122,17 @@ public partial class App : Application
             WinForms.ToolTipIcon.Info);
     }
 
-    private void OpenSettings()
+    private void OpenMain()
     {
         if (_config == null) return;
-        if (_settingsWin != null)
+        if (_mainWin != null)
         {
-            _settingsWin.Activate();
+            _mainWin.Activate();
             return;
         }
-        _settingsWin = new SettingsWindow(_config);
-        _settingsWin.Closed += (_, _) => _settingsWin = null;
-        _settingsWin.Show();
+        _mainWin = new ConsoleWindow(_config);
+        _mainWin.Closed += (_, _) => _mainWin = null;
+        _mainWin.Show();
     }
 
     private void ExitApp()

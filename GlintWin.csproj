@@ -11,12 +11,14 @@
     <RootNamespace>GlintWin</RootNamespace>
     <AssemblyName>GlintWin</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.1.0</Version>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <Version>0.2.0</Version>
     <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="Data\**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="app.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- tools/ 下是测试与脚本子工程，不参与主程序编译 -->
