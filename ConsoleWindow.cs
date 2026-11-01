@@ -410,6 +410,8 @@ public sealed class ConsoleWindow : Window
         sliderRow.Children.Add(_slider);
         sliderRow.Children.Add(_lblOpacity);
 
+        _lblBg = new TextBlock { Foreground = FgSubBrush, FontSize = 11.5 };
+        _lblFg = new TextBlock { Foreground = FgSubBrush, FontSize = 11.5 };
         var colorCard = Card(VStack(
             new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 12), Children = { tgtBg, tgtFg } },
             new TextBlock { Text = "调色盘", Foreground = FgSubBrush, FontSize = 11.5, Margin = new Thickness(0, 0, 0, 6) },
@@ -1023,6 +1025,7 @@ public sealed class ConsoleWindow : Window
                 dynamic lnk = shell.CreateShortcut(StartupLnk);
                 lnk.TargetPath = Environment.ProcessPath!;
                 lnk.WorkingDirectory = AppContext.BaseDirectory;
+                lnk.Arguments = "-tray";
                 lnk.Description = "GlintWin - 候选词英文释义悬浮条";
                 lnk.Save();
             }

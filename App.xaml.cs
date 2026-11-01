@@ -17,6 +17,8 @@ public partial class App : Application
     private MspWatcher? _mspWatcher;
     private Coordinator? _coordinator;
     private Config? _config;
+    private EventWaitHandle? _activateEvent;
+    private const string ActivateEventName = "GlintWin_ActivateUI";
     private ConsoleWindow? _mainWin;
     private bool _paused;
     private WinForms.ToolStripMenuItem? _pauseItem;
@@ -36,11 +38,18 @@ public partial class App : Application
         _mutex = new Mutex(true, "GlintWin_SingleInstance", out var createdNew);
         if (!createdNew)
         {
-            // 已有实例在运行：静默退出（阻塞式弹窗会变成无人理会的僵尸进程）
-            Logger.Info("another instance is running, exit");
+            // 已有实例：通知它打开主界面（双击图标必有响应），然后退出
+            try
+            {
+                using var evt = EventWaitHandle.OpenExisting(ActivateEventName);
+                evt.Set();
+            }
+            catch { }
+            Logger.Info("another instance is running, asked it to show UI");
             Shutdown();
             return;
         }
+        _activateEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivateEventName);
 
         Logger.Init();
         var cfg = Config.Load();
@@ -75,10 +84,22 @@ public partial class App : Application
         };
         _mspThread.Start();
 
+        var activateThread = new Thread(() =>
+        {
+            while (_activateEvent!.WaitOne())
+            {
+                Dispatcher.InvokeAsync(OpenMain);
+            }
+        })
+        { IsBackground = true, Name = "glint-activate" };
+        activateThread.Start();
+
         SetupTray();
 
-        // 首次运行（无配置文件）自动打开主界面
-        if (e.Args.Contains("--ui") || !File.Exists(Path.Combine(AppContext.BaseDirectory, "config.json")))
+        // 启动即打开主界面（-tray 用于开机自启静默；--ui 强制打开；首次运行强制打开）
+        bool startMinimized = e.Args.Any(a => string.Equals(a, "-tray", StringComparison.OrdinalIgnoreCase));
+        bool firstRun = !File.Exists(Path.Combine(AppContext.BaseDirectory, "config.json"));
+        if (e.Args.Contains("--ui") || firstRun || !startMinimized)
         {
             Dispatcher.InvokeAsync(OpenMain);
         }
