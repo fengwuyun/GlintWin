@@ -27,6 +27,9 @@ public sealed partial class Coordinator
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
 
     private readonly SemaphoreSlim _ocrGate = new(1, 1);
+    private readonly object _pillGate = new();
+    private NativeMethods.RECT _pillScreenRect;
+    private bool _pillScreenRectValid;
     private byte[]? _pixelBuf;
 
     private OverlayWindow? _overlay;
@@ -52,6 +55,7 @@ public sealed partial class Coordinator
     private string? _shownPinyin;
     private SkinTheme? _shownTheme;
     private string? _pendingTop;      // 首显确认：连续两帧一致才让悬浮条出现
+    private string? _prevFrameTop;    // 上一 OCR 帧的候选（用于 OCR 抖动去重）
     private DateTime _lastGoodParse = DateTime.MinValue;
     private bool _pillVisible;
 
@@ -80,12 +84,13 @@ public sealed partial class Coordinator
             {
                 try
                 {
-                if (!e.Visible)
+                    if (!e.Visible)
                         {
                             ResetTransient();
                             if (_pillVisible)
                             {
                                 _pillVisible = false;
+                                lock (_pillGate) { _pillScreenRectValid = false; }
                                 await OnUi(() => _overlay!.HidePill());
                             }
                             continue;
@@ -109,12 +114,13 @@ public sealed partial class Coordinator
     {
         _lastHash = 0;
         _hashRowBmp = null;
-        _lastTheme = null;
+        // 注意：_lastTheme 不重置 —— 同一皮肤跨组词保持取色稳定，避免每次组词首帧颜色跳变
         _lastCaptureRect = default;
         _lastCheckMs = 0;
         _shownTop = _shownGloss = _shownPinyin = null;
         _shownTheme = null;
         _pendingTop = null;
+        _prevFrameTop = null;
         _lastGoodParse = DateTime.MinValue;
     }
 
@@ -142,6 +148,7 @@ public sealed partial class Coordinator
         try
         {
             using var bmp = Capture(rect.Left, rect.Top, w, h);
+            ErasePill(bmp, rect);
             var bytes = GetPixels(bmp);
 
             // 哈希区域：优先用上次的候选行（拼音框光标闪烁、皮肤动画都在行外）；
@@ -201,10 +208,39 @@ public sealed partial class Coordinator
                 }
                 var (resolvedTop, resolvedGloss) = ResolveTop(newTop, strict);
 
+                // 帧级去抖：与当前显示的词等长且仅差 1 字 = OCR 单字误读抖动，
+                // 需连续两帧一致才接受，消除悬浮条文字闪烁
+                if (_pillVisible && resolvedTop != _lastTop &&
+                    resolvedTop is not null && _lastTop is not null &&
+                    resolvedTop.Length == _lastTop.Length && WithinOneChar(resolvedTop, _lastTop) &&
+                    resolvedTop != _prevFrameTop)
+                {
+                    _prevFrameTop = resolvedTop;
+                    resolvedTop = _lastTop;
+                    resolvedGloss = _lastGloss;
+                }
+                else
+                {
+                    _prevFrameTop = resolvedTop;
+                }
+
+                // 帧可信度闸门：第一候选被高亮动画吞掉时（行内无「1」序号），
+                // chunks[0] 实际是第二候选，本帧不可信 —— 保持旧值，且不污染主题/行哈希
+                bool frameTrusted = resolvedTop is null ||
+                                    strict ||
+                                    rowLine is null && resolvedTop == parsed.Top && parsed.Top is null ||
+                                    (rowLine != null && CandidateParser.HasMarkerOne(rowLine.Text)) ||
+                                    (rowLine is null && newTop is null);
+                if (!frameTrusted)
+                {
+                    resolvedTop = _lastTop;
+                    resolvedGloss = _lastGloss;
+                }
+
                 _lastTop = resolvedTop;
                 _lastGloss = resolvedGloss;
 
-                var rowBmp = rowLine is null ? null : LineRect(rowLine);
+                var rowBmp = rowLine is null || !frameTrusted ? null : LineRect(rowLine);
                 if (rowBmp.HasValue)
                 {
                     _lastRowRect = new NativeMethods.RECT
@@ -220,11 +256,12 @@ public sealed partial class Coordinator
                 }
                 else
                 {
-                    // 这一帧没找到行：沿用上一帧行位置，避免锚点抖动
+                    // 这一帧没找到行/不可信：沿用上一帧行位置，避免锚点抖动
                     _lastHasRow = _hashRowBmp.HasValue;
                 }
 
-                var sampled = rowBmp.HasValue ? SampleTheme(bytes, w, h, rowBmp) : _lastTheme;
+                var sampled = !frameTrusted ? _lastTheme
+                    : rowBmp.HasValue ? SampleTheme(bytes, w, h, rowBmp) : _lastTheme;
                 if (sampled is not null)
                 {
                     // 对比度归一：浅底强制深字/深底强制浅字，消除皮肤高亮淡入导致的灰色深浅抖动
@@ -289,6 +326,14 @@ public sealed partial class Coordinator
                 _shownTheme = theme;
             }
             _overlay!.Place(anchor, anchorOffset);
+            if (_overlay!.TryGetPlacedRect(out var pr))
+            {
+                lock (_pillGate)
+                {
+                    _pillScreenRect = pr;
+                    _pillScreenRectValid = true;
+                }
+            }
         });
     }
 
@@ -347,6 +392,31 @@ public sealed partial class Coordinator
         using var g = Graphics.FromImage(bmp);
         g.CopyFromScreen(x, y, 0, 0, new Size(w, h));
         return bmp;
+    }
+
+    /// <summary>
+    /// 把悬浮条自身像素从截图中抹掉（涂白）：悬浮条位于搜狗候选窗矩形内部，
+    /// 不抹掉会被下一帧 OCR 读到，形成「悬浮条文字进入识别→行框膨胀→字号变化→再识别」的反馈回路。
+    /// </summary>
+    private void ErasePill(Bitmap bmp, NativeMethods.RECT captureRect)
+    {
+        NativeMethods.RECT pr;
+        bool valid;
+        lock (_pillGate)
+        {
+            valid = _pillScreenRectValid;
+            pr = _pillScreenRect;
+        }
+        if (!valid) return;
+
+        var capRect = new Rectangle(captureRect.Left, captureRect.Top,
+            captureRect.Right - captureRect.Left, captureRect.Bottom - captureRect.Top);
+        var pillRect = new Rectangle(pr.Left, pr.Top, pr.Right - pr.Left, pr.Bottom - pr.Top);
+        var inter = Rectangle.Intersect(pillRect, capRect);
+        if (inter.Width <= 0 || inter.Height <= 0) return;
+        var local = new Rectangle(inter.X - captureRect.Left, inter.Y - captureRect.Top, inter.Width, inter.Height);
+        using var g = Graphics.FromImage(bmp);
+        g.FillRectangle(System.Drawing.Brushes.White, local);
     }
 
     private byte[] GetPixels(Bitmap bmp)
@@ -443,8 +513,17 @@ public sealed partial class Coordinator
 
     private static Rectangle? LineRect(OcrLineData line)
     {
+        var words = line.Words.Where(w => w.Width > 2).ToList();
+        if (words.Count == 0) return null;
+
+        // 排除离群词：拼音框的闪烁光标会被 OCR 读成细高竖条（"\"/"I"），
+        // 混进行框会把行高撑到 2 倍，导致字号/悬浮条尺寸逐帧跳动
+        var medH = Median(words.Select(w => w.Height));
+        var core = words.Where(w => w.Height <= medH * 1.6 + 2).ToList();
+        if (core.Count == 0) core = words;
+
         double minX = double.MaxValue, minY = double.MaxValue, maxX = 0, maxY = 0;
-        foreach (var wd in line.Words)
+        foreach (var wd in core)
         {
             minX = Math.Min(minX, wd.X);
             minY = Math.Min(minY, wd.Y);
@@ -457,7 +536,23 @@ public sealed partial class Coordinator
             (int)Math.Ceiling(maxX - minX), (int)Math.Ceiling(maxY - minY));
     }
 
+    private static double Median(IEnumerable<double> xs)
+    {
+        var sorted = xs.OrderBy(x => x).ToList();
+        return sorted.Count == 0 ? 0 : sorted[sorted.Count / 2];
+    }
+
     private static bool IsCjk(char c) => c is >= '\u4e00' and <= '\u9fff';
+
+    private static bool WithinOneChar(string a, string b)
+    {
+        int diff = 0;
+        for (int i = 0; i < a.Length; i++)
+        {
+            if (a[i] != b[i] && ++diff > 1) return false;
+        }
+        return true;
+    }
 
     [GeneratedRegex(@"(?:^|\s)\d{1,2}\s*[\.．、]\s*(?=[^\x00-\x7F])|\s\d{1,2}\s+(?=[^\x00-\x7F])")]
     private static partial Regex NumberedMarkerRegex();
@@ -507,6 +602,20 @@ public sealed partial class Coordinator
             return Color.FromRgb((byte)((rQ << 4) + 8), (byte)((gQ << 4) + 8), (byte)((bQ << 4) + 8));
         }
         var bg = BgFromKey(bgKey);
+
+        // 混入行区域中位色：最高频色常偏向高亮白，中位色带出候选栏本身的皮肤色调
+        long cum = 0;
+        int medKey = bgKey;
+        for (int k = 0; k < counts.Length; k++)
+        {
+            cum += counts[k];
+            if (cum >= total / 2)
+            {
+                medKey = k;
+                break;
+            }
+        }
+        bg = LerpColor(bg, BgFromKey(medKey), 0.35);
 
         // 文字色：频率 × 与背景的欧氏距离，取最高分
         Color? fg = null;

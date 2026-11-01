@@ -24,6 +24,8 @@ public sealed class OverlayWindow : Window
     private readonly double _defaultFontSize;
     private IntPtr _hwnd;
     private bool _shown;
+    private NativeMethods.RECT _placedRect;
+    private bool _placedValid;
 
     public OverlayWindow(Config cfg)
     {
@@ -82,7 +84,8 @@ public sealed class OverlayWindow : Window
         double fontSize;
         if (theme != null)
         {
-            bg = theme.Bg;
+            // 半透明：皮肤候选栏本身透底，悬浮条用同色半透明才能与皮肤观感一致
+            bg = Color.FromArgb(0xD8, theme.Bg.R, theme.Bg.G, theme.Bg.B);
             bright = theme.Fg;
             dim = Lerp(theme.Fg, theme.Bg, 0.45);
             double scale = VisualTreeHelper.GetDpi(this).PixelsPerDip;
@@ -151,6 +154,15 @@ public sealed class OverlayWindow : Window
 
         NativeMethods.SetWindowPos(_hwnd, NativeMethods.HWND_TOPMOST, x, y, w, h,
             NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW);
+        _placedRect = new NativeMethods.RECT { Left = x, Top = y, Right = x + w, Bottom = y + h };
+        _placedValid = true;
+    }
+
+    /// <summary>悬浮条当前占用的屏幕矩形（供 OCR 前抹除自身像素，切断反馈回路）。</summary>
+    public bool TryGetPlacedRect(out NativeMethods.RECT rect)
+    {
+        rect = _placedRect;
+        return _placedValid;
     }
 
     public void HidePill()
@@ -158,6 +170,7 @@ public sealed class OverlayWindow : Window
         if (!_shown) return;
         NativeMethods.SetWindowPos(_hwnd, IntPtr.Zero, -30000, -30000, 0, 0,
             NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_NOSIZE);
+        _placedValid = false;
     }
 
     private static Color Lerp(Color a, Color b, double t) => Color.FromRgb(

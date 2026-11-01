@@ -114,6 +114,19 @@ public static partial class CandidateParser
         return s.Length > 0 && s.Length <= 16 && CjkRegex().IsMatch(s) ? s : null;
     }
 
+    /// <summary>
+    /// 行内是否出现「1」序号标记。第一候选被高亮动画吞掉时行内只剩 2/3/4…，
+    /// 此时 chunks[0] 实为第二候选，该帧不可信。
+    /// 兼容 OCR 把 1 误读成 I/i/l/| 的变体。
+    /// </summary>
+    public static bool HasMarkerOne(string raw)
+    {
+        var s = Normalize(raw);
+        if (s.Length == 0) return false;
+        if (Regex.IsMatch(s, @"(?:^|\s)1\s*[\.。,，]?\s*(?=[^\x00-\x7F])")) return true;
+        return Regex.IsMatch(s, @"(?:^|\s)[Iil|]\s*[\.。]\s*(?=[^\x00-\x7F])");
+    }
+
     /// <summary>纯文本兜底路径（词级坐标不可用时）。</summary>
     public static string? ExtractTop(string raw)
     {
