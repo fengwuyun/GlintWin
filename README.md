@@ -82,35 +82,7 @@
 ## 支持范围与已知限制
 
 - **搜狗输入法**：完整支持（窗口锚定，全应用可用）。
-- **微软拼音**：需应用暴露 Win32 光标才可用——记事本 / WinForms / 多数原生应用可以，Chrome、VS Code 等自绘光标的应用暂不支持。
 - 释义只取**第一候选**（高亮项），跟随翻页选中项在路线图上；管理员权限窗口受会话隔离限制，无法截图，暂不支持。
-
-## 工作原理
-
-```
-搜狗通道：轮询候选窗 SoPY_Comp(40ms) → 小区域截图 → 像素哈希去重
-微软拼音：键盘拼音追踪 + 光标锚定 + 光标下方条带 OCR（搜狗可见时让位）
-公共管线：OCR(zh-Hans-CN) → 按词级间隙切分候选 → 采样皮肤配色
-        → CC-CEDICT 查询（整词 → 最长前缀 ≤6 字 → 拼音交叉纠错）→ 胶囊定位
-```
-
-外观直接采样候选行像素，能跟随任意皮肤；释义取 CC-CEDICT 前两义，去 `to ` 前缀、` · ` 连接，宁缺勿错；主题色/字号指数平滑防闪烁，首帧需连续两帧一致。
-
-## 隐私边界
-
-架构级约束，不是可选项：全离线（无网络代码，OCR 用系统引擎，词典在本地）；只截取输入法候选窗 / 光标下方小条带，**不读正文**；键盘钩子仅记录 A–Z 拼音序列（不持久化原始按键）；**不注入进程**、不写剪贴板、不上传任何内容。只有主动开启每日采集后，才把待核对词条存进本地 `daily-words.db`。
-
-## 从源码构建
-
-需要 .NET 10 SDK：
-
-```bash
-dotnet build -c Release
-dotnet publish -c Release -r win-x64 --self-contained true \
-  -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
-```
-
-回归测试在 `tools/ParserTest`、`PositionTest`、`DailyTest`、`ConfigTest`、`UiTest`；词典重建 `python tools/convert_cedict.py`。详见 [技术说明](docs/TECHNICAL.md)。
 
 ## 参考与致谢
 
