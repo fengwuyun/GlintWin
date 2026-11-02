@@ -169,6 +169,10 @@ public partial class App : Application
         menu.Items.Add(new WinForms.ToolStripSeparator());
         menu.Items.Add(exit);
         _tray.ContextMenuStrip = menu;
+        _tray.MouseClick += (_, ev) =>
+        {
+            if (ev.Button == WinForms.MouseButtons.Left) Dispatcher.InvokeAsync(OpenMain);
+        };
 
         _tray.ShowBalloonTip(3000, "GlintWin 已启动",
             "用搜狗打字时，候选栏下方会显示英文释义（本地离线处理，不读取正文）。",
@@ -186,15 +190,20 @@ public partial class App : Application
 
     private void OpenMain()
     {
-        if (_config == null) return;
-        if (_mainWin != null)
+        if (!Dispatcher.CheckAccess())
         {
-            _mainWin.Activate();
+            Dispatcher.InvokeAsync(OpenMain);
             return;
         }
-        _mainWin = new ConsoleWindow(_config, () => _coordinator?.Dictionary, ReloadDictionary, _daily);
-        _mainWin.Closed += (_, _) => _mainWin = null;
-        _mainWin.Show();
+        if (_config == null) return;
+        if (_mainWin == null)
+        {
+            _mainWin = new ConsoleWindow(_config, () => _coordinator?.Dictionary, ReloadDictionary, _daily);
+            _mainWin.Closed += (_, _) => _mainWin = null;
+        }
+        if (!_mainWin.IsVisible) _mainWin.Show();
+        if (_mainWin.WindowState == WindowState.Minimized) _mainWin.WindowState = WindowState.Normal;
+        _mainWin.Activate();
     }
 
     private void ExitApp()

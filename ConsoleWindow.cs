@@ -182,7 +182,7 @@ public sealed partial class ConsoleWindow : Window
         sp.Children.Add(new Border { Height = 1, Background = LineBrush, Margin = new Thickness(8, 14, 8, 10), Opacity = 0.5 });
         sp.Children.Add(new TextBlock
         {
-            Text = "v0.4.2 · 全离线处理\n每日采集可选 · 不上传",
+            Text = "v0.4.3 · 全离线处理\n每日采集可选 · 不上传",
             FontSize = 11,
             Foreground = FgSubBrush,
             Margin = new Thickness(8, 0, 0, 0),
@@ -894,7 +894,7 @@ public sealed partial class ConsoleWindow : Window
 
         sp.Children.Add(Card(VStack(
             CardTitle("关于"),
-            new TextBlock { Text = "GlintWin v0.4.2 — 输入中文，顺手看见英文。", Foreground = FgBrush, Margin = new Thickness(0, 0, 0, 4) },
+            new TextBlock { Text = "GlintWin v0.4.3 — 输入中文，顺手看见英文。", Foreground = FgBrush, Margin = new Thickness(0, 0, 0, 4) },
             new TextBlock { Text = "全离线运行，不上传输入。每日词汇默认关闭，开启后仅本地保存待核对词条。", Foreground = FgSubBrush, Margin = new Thickness(0, 0, 0, 4) },
             new TextBlock { Text = "词典：CC-CEDICT（CC-BY-SA 4.0）+ 主题词包 + 自定义词库。", Foreground = FgSubBrush })));
 
