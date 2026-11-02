@@ -8,7 +8,8 @@ using System.IO;
 class Program
 {
     static void Check(bool ok, string name) { if (!ok) throw new Exception("FAIL " + name); Console.WriteLine("PASS " + name); }
-    [STAThread] static void Main(string[] args)
+    [STAThread] static void Main(string[] args) { try { Run(args); } catch (Exception ex) { Console.Error.WriteLine(ex); Environment.Exit(1); } }
+    static void Run(string[] args)
     {
         var app = new Application();
         System.Threading.SynchronizationContext.SetSynchronizationContext(new System.Windows.Threading.DispatcherSynchronizationContext(app.Dispatcher));
@@ -65,6 +66,16 @@ class Program
         Check(!cfg.AutoCollectDailyInput, "automatic collection remains opt-in");
         window.Width = 980; window.Height = 720;
         window.Show();
+        Directory.CreateDirectory(Path.Combine(AppPaths.Root, "Data", "Packs"));
+        File.WriteAllText(Path.Combine(AppPaths.Root, "Data", "Packs", "test_extra.json"), "{\"测试词包\":{\"p\":\"ce shi ci bao\",\"s\":[\"test pack\"]}}");
+        IEnumerable<string> Texts(DependencyObject root)
+        {
+            if (root is TextBlock text) yield return text.Text;
+            foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
+                foreach (var value in Texts(child)) yield return value;
+        }
+        Check(Texts((DependencyObject)Call("BuildDictPage")!).Contains("test_extra"), "new dictionary packs appear without code changes");
+        File.Delete(Path.Combine(AppPaths.Root, "Data", "Packs", "test_extra.json"));
         foreach (var page in new[]{"look", "settings", "status", "dict", "daily"})
         {
             Call("ShowPage", page);

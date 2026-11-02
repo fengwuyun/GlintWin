@@ -1,0 +1,572 @@
+{
+  "生成式人工智能": {
+    "p": "sheng cheng shi ren gong zhi neng",
+    "s": [
+      "generative artificial intelligence"
+    ]
+  },
+  "检索增强生成": {
+    "p": "jian suo zeng qiang sheng cheng",
+    "s": [
+      "retrieval-augmented generation"
+    ]
+  },
+  "智能体工作流": {
+    "p": "zhi neng ti gong zuo liu",
+    "s": [
+      "agent workflow"
+    ]
+  },
+  "多智能体": {
+    "p": "duo zhi neng ti",
+    "s": [
+      "multi-agent systems"
+    ]
+  },
+  "工具调用": {
+    "p": "gong ju diao yong",
+    "s": [
+      "tool calling"
+    ]
+  },
+  "函数调用": {
+    "p": "han shu diao yong",
+    "s": [
+      "function calling"
+    ]
+  },
+  "结构化输出": {
+    "p": "jie gou hua shu chu",
+    "s": [
+      "structured output"
+    ]
+  },
+  "上下文窗口": {
+    "p": "shang xia wen chuang kou",
+    "s": [
+      "context window"
+    ]
+  },
+  "上下文工程": {
+    "p": "shang xia wen gong cheng",
+    "s": [
+      "context engineering"
+    ]
+  },
+  "上下文压缩": {
+    "p": "shang xia wen ya suo",
+    "s": [
+      "context compaction"
+    ]
+  },
+  "提示词注入": {
+    "p": "ti shi ci zhu ru",
+    "s": [
+      "prompt injection"
+    ]
+  },
+  "系统提示词": {
+    "p": "xi tong ti shi ci",
+    "s": [
+      "system prompt"
+    ]
+  },
+  "少样本学习": {
+    "p": "shao yang ben xue xi",
+    "s": [
+      "few-shot learning"
+    ]
+  },
+  "零样本学习": {
+    "p": "ling yang ben xue xi",
+    "s": [
+      "zero-shot learning"
+    ]
+  },
+  "思维链": {
+    "p": "si wei lian",
+    "s": [
+      "chain of thought"
+    ]
+  },
+  "推理模型": {
+    "p": "tui li mo xing",
+    "s": [
+      "reasoning model"
+    ]
+  },
+  "推理预算": {
+    "p": "tui li yu suan",
+    "s": [
+      "reasoning budget"
+    ]
+  },
+  "测试时计算": {
+    "p": "ce shi shi ji suan",
+    "s": [
+      "test-time compute"
+    ]
+  },
+  "模型蒸馏": {
+    "p": "mo xing zheng liu",
+    "s": [
+      "model distillation"
+    ]
+  },
+  "知识蒸馏": {
+    "p": "zhi shi zheng liu",
+    "s": [
+      "knowledge distillation"
+    ]
+  },
+  "模型量化": {
+    "p": "mo xing liang hua",
+    "s": [
+      "model quantization"
+    ]
+  },
+  "低秩适配": {
+    "p": "di zhi shi pei",
+    "s": [
+      "low-rank adaptation"
+    ]
+  },
+  "参数高效微调": {
+    "p": "can shu gao xiao wei tiao",
+    "s": [
+      "parameter-efficient fine-tuning"
+    ]
+  },
+  "监督微调": {
+    "p": "jian du wei tiao",
+    "s": [
+      "supervised fine-tuning"
+    ]
+  },
+  "偏好对齐": {
+    "p": "pian hao dui qi",
+    "s": [
+      "preference alignment"
+    ]
+  },
+  "奖励模型": {
+    "p": "jiang li mo xing",
+    "s": [
+      "reward model"
+    ]
+  },
+  "混合专家模型": {
+    "p": "hun he zhuan jia mo xing",
+    "s": [
+      "mixture-of-experts model"
+    ]
+  },
+  "稀疏注意力": {
+    "p": "xi shu zhu yi li",
+    "s": [
+      "sparse attention"
+    ]
+  },
+  "向量数据库": {
+    "p": "xiang liang shu ju ku",
+    "s": [
+      "vector database"
+    ]
+  },
+  "向量检索": {
+    "p": "xiang liang jian suo",
+    "s": [
+      "vector search"
+    ]
+  },
+  "语义检索": {
+    "p": "yu yi jian suo",
+    "s": [
+      "semantic search"
+    ]
+  },
+  "混合检索": {
+    "p": "hun he jian suo",
+    "s": [
+      "hybrid search"
+    ]
+  },
+  "重排序模型": {
+    "p": "chong pai xu mo xing",
+    "s": [
+      "reranking model"
+    ]
+  },
+  "文本嵌入": {
+    "p": "wen ben qian ru",
+    "s": [
+      "text embeddings"
+    ]
+  },
+  "文档切分": {
+    "p": "wen dang qie fen",
+    "s": [
+      "document chunking"
+    ]
+  },
+  "流式输出": {
+    "p": "liu shi shu chu",
+    "s": [
+      "streaming output"
+    ]
+  },
+  "首字延迟": {
+    "p": "shou zi yan chi",
+    "s": [
+      "time to first token"
+    ]
+  },
+  "提示词缓存": {
+    "p": "ti shi ci huan cun",
+    "s": [
+      "prompt caching"
+    ]
+  },
+  "幻觉检测": {
+    "p": "huan jue jian ce",
+    "s": [
+      "hallucination detection"
+    ]
+  },
+  "人工复核": {
+    "p": "ren gong fu he",
+    "s": [
+      "human review"
+    ]
+  },
+  "端侧模型": {
+    "p": "duan ce mo xing",
+    "s": [
+      "on-device model"
+    ]
+  },
+  "代码补全": {
+    "p": "dai ma bu quan",
+    "s": [
+      "code completion"
+    ]
+  },
+  "代码审查": {
+    "p": "dai ma shen cha",
+    "s": [
+      "code review"
+    ]
+  },
+  "拉取请求": {
+    "p": "la qu qing qiu",
+    "s": [
+      "pull request"
+    ]
+  },
+  "合并请求": {
+    "p": "he bing qing qiu",
+    "s": [
+      "merge request"
+    ]
+  },
+  "合并冲突": {
+    "p": "he bing chong tu",
+    "s": [
+      "merge conflict"
+    ]
+  },
+  "功能分支": {
+    "p": "gong neng fen zhi",
+    "s": [
+      "feature branch"
+    ]
+  },
+  "依赖注入": {
+    "p": "yi lai zhu ru",
+    "s": [
+      "dependency injection"
+    ]
+  },
+  "依赖锁定": {
+    "p": "yi lai suo ding",
+    "s": [
+      "dependency locking"
+    ]
+  },
+  "语义化版本": {
+    "p": "yu yi hua ban ben",
+    "s": [
+      "semantic versioning"
+    ]
+  },
+  "回归测试": {
+    "p": "hui gui ce shi",
+    "s": [
+      "regression testing"
+    ]
+  },
+  "冒烟测试": {
+    "p": "mao yan ce shi",
+    "s": [
+      "smoke testing"
+    ]
+  },
+  "端到端测试": {
+    "p": "duan dao duan ce shi",
+    "s": [
+      "end-to-end testing"
+    ]
+  },
+  "持续集成": {
+    "p": "chi xu ji cheng",
+    "s": [
+      "continuous integration"
+    ]
+  },
+  "持续交付": {
+    "p": "chi xu jiao fu",
+    "s": [
+      "continuous delivery"
+    ]
+  },
+  "灰度发布": {
+    "p": "hui du fa bu",
+    "s": [
+      "canary rollout"
+    ]
+  },
+  "滚动更新": {
+    "p": "gun dong geng xin",
+    "s": [
+      "rolling update"
+    ]
+  },
+  "热修复": {
+    "p": "re xiu fu",
+    "s": [
+      "hotfix"
+    ]
+  },
+  "故障回滚": {
+    "p": "gu zhang hui gun",
+    "s": [
+      "failure rollback"
+    ]
+  },
+  "内存泄漏": {
+    "p": "nei cun xie lou",
+    "s": [
+      "memory leak"
+    ]
+  },
+  "内存占用": {
+    "p": "nei cun zhan yong",
+    "s": [
+      "memory usage"
+    ]
+  },
+  "垃圾回收": {
+    "p": "la ji hui shou",
+    "s": [
+      "garbage collection"
+    ]
+  },
+  "对象池": {
+    "p": "dui xiang chi",
+    "s": [
+      "object pool"
+    ]
+  },
+  "零拷贝": {
+    "p": "ling kao bei",
+    "s": [
+      "zero-copy"
+    ]
+  },
+  "竞态条件": {
+    "p": "jing tai tiao jian",
+    "s": [
+      "race condition"
+    ]
+  },
+  "线程安全": {
+    "p": "xian cheng an quan",
+    "s": [
+      "thread safety"
+    ]
+  },
+  "幂等性": {
+    "p": "mi deng xing",
+    "s": [
+      "idempotency"
+    ]
+  },
+  "指数退避": {
+    "p": "zhi shu tui bi",
+    "s": [
+      "exponential backoff"
+    ]
+  },
+  "限流": {
+    "p": "xian liu",
+    "s": [
+      "rate limiting"
+    ]
+  },
+  "熔断机制": {
+    "p": "rong duan ji zhi",
+    "s": [
+      "circuit breaker"
+    ]
+  },
+  "可观测性": {
+    "p": "ke guan ce xing",
+    "s": [
+      "observability"
+    ]
+  },
+  "调用链追踪": {
+    "p": "diao yong lian zhui zong",
+    "s": [
+      "distributed tracing"
+    ]
+  },
+  "最小权限": {
+    "p": "zui xiao quan xian",
+    "s": [
+      "least privilege"
+    ]
+  },
+  "权限提升": {
+    "p": "quan xian ti sheng",
+    "s": [
+      "privilege escalation"
+    ]
+  },
+  "单点登录": {
+    "p": "dan dian deng lu",
+    "s": [
+      "single sign-on"
+    ]
+  },
+  "多因素认证": {
+    "p": "duo yin su ren zheng",
+    "s": [
+      "multi-factor authentication"
+    ]
+  },
+  "会议纪要": {
+    "p": "hui yi ji yao",
+    "s": [
+      "meeting minutes"
+    ]
+  },
+  "行动项": {
+    "p": "xing dong xiang",
+    "s": [
+      "action item"
+    ]
+  },
+  "待办事项": {
+    "p": "dai ban shi xiang",
+    "s": [
+      "to-do item"
+    ]
+  },
+  "需求评审": {
+    "p": "xu qiu ping shen",
+    "s": [
+      "requirements review"
+    ]
+  },
+  "验收标准": {
+    "p": "yan shou biao zhun",
+    "s": [
+      "acceptance criteria"
+    ]
+  },
+  "项目复盘": {
+    "p": "xiang mu fu pan",
+    "s": [
+      "project retrospective"
+    ]
+  },
+  "排期": {
+    "p": "pai qi",
+    "s": [
+      "schedule planning"
+    ]
+  },
+  "里程碑计划": {
+    "p": "li cheng bei ji hua",
+    "s": [
+      "milestone plan"
+    ]
+  },
+  "工作交接": {
+    "p": "gong zuo jiao jie",
+    "s": [
+      "work handover"
+    ]
+  },
+  "进度同步": {
+    "p": "jin du tong bu",
+    "s": [
+      "progress update"
+    ]
+  },
+  "文档协作": {
+    "p": "wen dang xie zuo",
+    "s": [
+      "collaborative document editing"
+    ]
+  },
+  "版本历史": {
+    "p": "ban ben li shi",
+    "s": [
+      "version history"
+    ]
+  },
+  "数据透视表": {
+    "p": "shu ju tou shi biao",
+    "s": [
+      "pivot table"
+    ]
+  },
+  "条件格式": {
+    "p": "tiao jian ge shi",
+    "s": [
+      "conditional formatting"
+    ]
+  },
+  "数据验证": {
+    "p": "shu ju yan zheng",
+    "s": [
+      "data validation"
+    ]
+  },
+  "批量处理": {
+    "p": "pi liang chu li",
+    "s": [
+      "batch processing"
+    ]
+  },
+  "自动化流程": {
+    "p": "zi dong hua liu cheng",
+    "s": [
+      "automated workflow"
+    ]
+  },
+  "知识库": {
+    "p": "zhi shi ku",
+    "s": [
+      "knowledge base"
+    ]
+  },
+  "信息孤岛": {
+    "p": "xin xi gu dao",
+    "s": [
+      "information silo"
+    ]
+  }
+}

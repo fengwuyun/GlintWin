@@ -182,7 +182,7 @@ public sealed partial class ConsoleWindow : Window
         sp.Children.Add(new Border { Height = 1, Background = LineBrush, Margin = new Thickness(8, 14, 8, 10), Opacity = 0.5 });
         sp.Children.Add(new TextBlock
         {
-            Text = "v0.4.1 · 全离线处理\n每日采集可选 · 不上传",
+            Text = "v0.4.2 · 全离线处理\n每日采集可选 · 不上传",
             FontSize = 11,
             Foreground = FgSubBrush,
             Margin = new Thickness(8, 0, 0, 0),
@@ -725,9 +725,18 @@ public sealed partial class ConsoleWindow : Window
             ("ai", "AI 术语"),
             ("shortdrama", "短剧黑话"),
         };
-        foreach (var (id, name) in builtin)
+        var packDirectory = Path.Combine(AppPaths.Root, "Data", "Packs");
+        Directory.CreateDirectory(packDirectory);
+        var names = builtin.ToDictionary(p => p.Id, p => p.Name, StringComparer.OrdinalIgnoreCase);
+        names["modern_daily"] = "日常口语与网络表达";
+        names["modern_tech"] = "AI、编程与办公术语";
+        var discovered = Directory.GetFiles(packDirectory, "*.json")
+            .Select(Path.GetFileNameWithoutExtension).OfType<string>()
+            .OrderBy(id => id, StringComparer.OrdinalIgnoreCase);
+        foreach (var id in discovered)
         {
-            var file = Path.Combine(AppPaths.Root, "Data", "Packs", id + ".json");
+            var name = names.TryGetValue(id, out var displayName) ? displayName : id;
+            var file = Path.Combine(packDirectory, id + ".json");
             int count = 0;
             try { if (File.Exists(file)) count = CountJsonEntries(file); } catch { }
             var on = _cfg.EnabledPacks.Contains(id, StringComparer.OrdinalIgnoreCase);
@@ -751,7 +760,8 @@ public sealed partial class ConsoleWindow : Window
             packList.Children.Add(row);
         }
         sp.Children.Add(Card(VStack(CardTitle("主题词包"), packList,
-            new TextBlock { Text = "启停即时生效（动态重载词典，无需重启）。", Foreground = FgSubBrush, FontSize = 11.5 })));
+            FlatButton("打开词包目录", () => Process.Start(new ProcessStartInfo("explorer.exe", $"\"{packDirectory}\"") { UseShellExecute = true })),
+            new TextBlock { Text = "启停即时生效。新 JSON 词包放入目录后，重新进入此页即可显示；个人词条可在下方导入 CSV。", TextWrapping = TextWrapping.Wrap, Foreground = FgSubBrush, FontSize = 11.5 })));
 
         var grid = new DataGrid
         {
@@ -884,7 +894,7 @@ public sealed partial class ConsoleWindow : Window
 
         sp.Children.Add(Card(VStack(
             CardTitle("关于"),
-            new TextBlock { Text = "GlintWin v0.4.1 — 输入中文，顺手看见英文。", Foreground = FgBrush, Margin = new Thickness(0, 0, 0, 4) },
+            new TextBlock { Text = "GlintWin v0.4.2 — 输入中文，顺手看见英文。", Foreground = FgBrush, Margin = new Thickness(0, 0, 0, 4) },
             new TextBlock { Text = "全离线运行，不上传输入。每日词汇默认关闭，开启后仅本地保存待核对词条。", Foreground = FgSubBrush, Margin = new Thickness(0, 0, 0, 4) },
             new TextBlock { Text = "词典：CC-CEDICT（CC-BY-SA 4.0）+ 主题词包 + 自定义词库。", Foreground = FgSubBrush })));
 

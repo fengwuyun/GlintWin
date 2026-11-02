@@ -40,7 +40,7 @@ public sealed class Config
     }
 
     // 启用的主题词包（Data/Packs/*.json 的文件名，不含扩展名）
-    public List<string> EnabledPacks { get; set; } = new() { "internet", "ai", "shortdrama" };
+    public List<string> EnabledPacks { get; set; } = new() { "internet", "ai", "shortdrama", "modern_daily", "modern_tech" };
 
     public static Config Load()
     {

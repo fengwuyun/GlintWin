@@ -17,3 +17,16 @@ for(int i=0;i<100;i++)dict.Lookup("学习");
 long before=GC.GetAllocatedBytesForCurrentThread();for(int i=0;i<10000;i++)dict.Lookup("学习");long allocated=GC.GetAllocatedBytesForCurrentThread()-before;
 Check(allocated<=4096,$"repeated exact lookups avoid formatting allocations ({allocated} bytes)");
 }finally{File.Delete(path);}
+if(args.Length==2){
+var full=CedictDictionary.Load(args[0])!;
+foreach(var id in new[]{"internet","ai","shortdrama"}) full.MergeFrom(Path.Combine(args[1],id+".json"));
+int before=full.Count;
+foreach(var (id,expected) in new[]{("modern_daily",60),("modern_tech",95)}){
+ var file=Path.Combine(args[1],id+".json");
+ var entries=System.Text.Json.JsonSerializer.Deserialize<Dictionary<string,CedictDictionary.DictDto>>(File.ReadAllText(file))!;
+ Check(entries.Count==expected && entries.All(e=>e.Value.Pinyin.Split(' ',StringSplitOptions.RemoveEmptyEntries).Length==e.Key.Length && e.Value.Senses.Length>0 && e.Value.Senses.All(s=>!string.IsNullOrWhiteSpace(s))), id+" entry count, pinyin syllables and definitions valid");
+ full.MergeFrom(file);
+ Check(entries.All(e=>full.Lookup(e.Key)==CedictDictionary.Format(e.Value.Senses) && full.PinyinOf(e.Key)==e.Value.Pinyin),id+" exact lookup and pinyin round trip");
+}
+Console.WriteLine($"Vocabulary coverage: before={before}; after={full.Count}; newly covered={full.Count-before}; curated entries=155");
+}

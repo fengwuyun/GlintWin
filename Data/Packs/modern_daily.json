@@ -1,0 +1,362 @@
+{
+  "搭把手": {
+    "p": "da ba shou",
+    "s": [
+      "give someone a hand"
+    ]
+  },
+  "别着急": {
+    "p": "bie zhao ji",
+    "s": [
+      "take your time"
+    ]
+  },
+  "不着急": {
+    "p": "bu zhao ji",
+    "s": [
+      "no rush"
+    ]
+  },
+  "稍等一下": {
+    "p": "shao deng yi xia",
+    "s": [
+      "just a moment"
+    ]
+  },
+  "等我一下": {
+    "p": "deng wo yi xia",
+    "s": [
+      "wait for me a moment"
+    ]
+  },
+  "回头再说": {
+    "p": "hui tou zai shuo",
+    "s": [
+      "talk about it later"
+    ]
+  },
+  "晚点再说": {
+    "p": "wan dian zai shuo",
+    "s": [
+      "talk about it later"
+    ]
+  },
+  "改天再聊": {
+    "p": "gai tian zai liao",
+    "s": [
+      "chat another day"
+    ]
+  },
+  "先这样吧": {
+    "p": "xian zhe yang ba",
+    "s": [
+      "let us leave it there for now"
+    ]
+  },
+  "就这么定了": {
+    "p": "jiu zhe me ding le",
+    "s": [
+      "it is settled"
+    ]
+  },
+  "我先走了": {
+    "p": "wo xian zou le",
+    "s": [
+      "I am heading out"
+    ]
+  },
+  "马上就来": {
+    "p": "ma shang jiu lai",
+    "s": [
+      "be right there"
+    ]
+  },
+  "快到了": {
+    "p": "kuai dao le",
+    "s": [
+      "almost there"
+    ]
+  },
+  "到家了吗": {
+    "p": "dao jia le ma",
+    "s": [
+      "did you get home"
+    ]
+  },
+  "路上小心": {
+    "p": "lu shang xiao xin",
+    "s": [
+      "take care on the way"
+    ]
+  },
+  "辛苦你了": {
+    "p": "xin ku ni le",
+    "s": [
+      "thanks for your hard work"
+    ]
+  },
+  "麻烦你了": {
+    "p": "ma fan ni le",
+    "s": [
+      "thanks for your help"
+    ]
+  },
+  "不用客气": {
+    "p": "bu yong ke qi",
+    "s": [
+      "you are welcome"
+    ]
+  },
+  "没关系的": {
+    "p": "mei guan xi de",
+    "s": [
+      "it is all right"
+    ]
+  },
+  "没什么事": {
+    "p": "mei shen me shi",
+    "s": [
+      "nothing in particular"
+    ]
+  },
+  "没太听懂": {
+    "p": "mei tai ting dong",
+    "s": [
+      "I did not quite understand"
+    ]
+  },
+  "我再想想": {
+    "p": "wo zai xiang xiang",
+    "s": [
+      "let me think it over"
+    ]
+  },
+  "让我看看": {
+    "p": "rang wo kan kan",
+    "s": [
+      "let me take a look"
+    ]
+  },
+  "说来话长": {
+    "p": "shuo lai hua chang",
+    "s": [
+      "it is a long story"
+    ]
+  },
+  "看情况吧": {
+    "p": "kan qing kuang ba",
+    "s": [
+      "it depends"
+    ]
+  },
+  "看你方便": {
+    "p": "kan ni fang bian",
+    "s": [
+      "whenever it suits you"
+    ]
+  },
+  "方便的话": {
+    "p": "fang bian de hua",
+    "s": [
+      "if it is convenient"
+    ]
+  },
+  "有空再聊": {
+    "p": "you kong zai liao",
+    "s": [
+      "talk when you have time"
+    ]
+  },
+  "随时联系": {
+    "p": "sui shi lian xi",
+    "s": [
+      "keep in touch"
+    ]
+  },
+  "记得提醒我": {
+    "p": "ji de ti xing wo",
+    "s": [
+      "remember to remind me"
+    ]
+  },
+  "帮我看看": {
+    "p": "bang wo kan kan",
+    "s": [
+      "take a look for me"
+    ]
+  },
+  "发我一下": {
+    "p": "fa wo yi xia",
+    "s": [
+      "send it to me"
+    ]
+  },
+  "收到请回复": {
+    "p": "shou dao qing hui fu",
+    "s": [
+      "please confirm receipt"
+    ]
+  },
+  "不好意思打扰": {
+    "p": "bu hao yi si da rao",
+    "s": [
+      "sorry to bother you"
+    ]
+  },
+  "抱歉久等了": {
+    "p": "bao qian jiu deng le",
+    "s": [
+      "sorry to keep you waiting"
+    ]
+  },
+  "有点离谱": {
+    "p": "you dian li pu",
+    "s": [
+      "a bit ridiculous"
+    ]
+  },
+  "太真实了": {
+    "p": "tai zhen shi le",
+    "s": [
+      "that is so relatable"
+    ]
+  },
+  "有被治愈到": {
+    "p": "you bei zhi yu dao",
+    "s": [
+      "that felt comforting"
+    ]
+  },
+  "情绪价值": {
+    "p": "qing xu jia zhi",
+    "s": [
+      "emotional support"
+    ]
+  },
+  "情绪内耗": {
+    "p": "qing xu nei hao",
+    "s": [
+      "emotional exhaustion from overthinking"
+    ]
+  },
+  "精神内耗": {
+    "p": "jing shen nei hao",
+    "s": [
+      "mental exhaustion from overthinking"
+    ]
+  },
+  "停止内耗": {
+    "p": "ting zhi nei hao",
+    "s": [
+      "stop overthinking"
+    ]
+  },
+  "边界感": {
+    "p": "bian jie gan",
+    "s": [
+      "a sense of personal boundaries"
+    ]
+  },
+  "松弛感": {
+    "p": "song chi gan",
+    "s": [
+      "a relaxed and effortless manner"
+    ]
+  },
+  "钝感力": {
+    "p": "dun gan li",
+    "s": [
+      "resilience to minor criticism"
+    ]
+  },
+  "搭子": {
+    "p": "da zi",
+    "s": [
+      "an activity buddy"
+    ]
+  },
+  "饭搭子": {
+    "p": "fan da zi",
+    "s": [
+      "a dining buddy"
+    ]
+  },
+  "电子榨菜": {
+    "p": "dian zi zha cai",
+    "s": [
+      "light entertainment to watch while eating"
+    ]
+  },
+  "嘴替": {
+    "p": "zui ti",
+    "s": [
+      "someone who says what others are thinking"
+    ]
+  },
+  "显眼包": {
+    "p": "xian yan bao",
+    "s": [
+      "an attention-seeker"
+    ]
+  },
+  "上大分": {
+    "p": "shang da fen",
+    "s": [
+      "score major points"
+    ]
+  },
+  "狠狠爱了": {
+    "p": "hen hen ai le",
+    "s": [
+      "absolutely love it"
+    ]
+  },
+  "好评如潮": {
+    "p": "hao ping ru chao",
+    "s": [
+      "overwhelmingly positive reviews"
+    ]
+  },
+  "体验感": {
+    "p": "ti yan gan",
+    "s": [
+      "the quality of the experience"
+    ]
+  },
+  "仪式感": {
+    "p": "yi shi gan",
+    "s": [
+      "a sense of occasion"
+    ]
+  },
+  "氛围感": {
+    "p": "fen wei gan",
+    "s": [
+      "a distinctive atmosphere"
+    ]
+  },
+  "低能量": {
+    "p": "di neng liang",
+    "s": [
+      "low energy"
+    ]
+  },
+  "自洽": {
+    "p": "zi qia",
+    "s": [
+      "internally consistent"
+    ]
+  },
+  "悦己": {
+    "p": "yue ji",
+    "s": [
+      "do things for oneself"
+    ]
+  },
+  "活人感": {
+    "p": "huo ren gan",
+    "s": [
+      "an authentic human presence"
+    ]
+  }
+}

@@ -25,7 +25,8 @@ public sealed partial class Coordinator
     private readonly object _watchGate = new();
     private WatchEvent _latestWatch;
     private long _watchVersion;
-    private bool? _activeSource;
+    private readonly WatchSession _session = new();
+    private long _processedSession = -1;
     private bool _lastFrameTrusted;
     public Action<string, string, string?, long, long>? CandidateObserved { get; set; }
     private IReadOnlyList<(string Word, string? Meaning)>? _lastChoices;
@@ -93,6 +94,7 @@ public sealed partial class Coordinator
         {
             // A retiring input-method channel must not hide the other active channel.
             if (!e.Visible && _latestWatch.Visible && e.RequireNumbered != _latestWatch.RequireNumbered) return;
+            _session.Observe(e.Visible, e.RequireNumbered);
             if (e != _latestWatch) _watchVersion++;
             _latestWatch = e;
             _channel.Writer.TryWrite(e);
@@ -120,15 +122,15 @@ public sealed partial class Coordinator
             {
                 try
                 {
-                    long version;
-                    lock (_watchGate) { if (e != _latestWatch) continue; version = _watchVersion; }
-                    if (_activeSource != e.RequireNumbered)
+                    long version, session;
+                    lock (_watchGate) { if (e != _latestWatch) continue; version = _watchVersion; session = _session.Generation; }
+                    if (_processedSession != session)
                     {
                         ResetTransient();
                         _pillVisible = false;
                         await OnUi(() => _overlay!.HidePill());
                         CompositionHidden?.Invoke();
-                        _activeSource = e.RequireNumbered;
+                        _processedSession = session;
                     }
                     if (!e.Visible)
                         {
@@ -161,6 +163,7 @@ public sealed partial class Coordinator
     {
         _lastHash = 0;
         _position.Reset();
+        lock (_pillGate) { _pillScreenRectValid = false; }
         _lastHasRow = false;
         _lastFrameTrusted = false;
         _lastChoices = null;
@@ -190,7 +193,7 @@ public sealed partial class Coordinator
         bool sameRect = _lastCaptureRect.Left == rect.Left && _lastCaptureRect.Top == rect.Top
             && _lastCaptureRect.Right == rect.Right && _lastCaptureRect.Bottom == rect.Bottom;
         long nowMs = Environment.TickCount64;
-        if (sameRect && nowMs - _lastCheckMs < 250) return;
+        if (sameRect && nowMs - _lastCheckMs < (_pillVisible ? 250 : 80)) return;
         _lastCaptureRect = rect;
         _lastCheckMs = nowMs;
 
@@ -218,7 +221,7 @@ public sealed partial class Coordinator
                 : new Rectangle(0, h * 55 / 100, w, h - h * 55 / 100);
             int hash = HashCode.Combine(HashRegion(bytes, w, hashRect), rect.Left, rect.Top, w, h);
             hashChanged = hash != _lastHash;
-            if (hashChanged)
+            if (hashChanged || !_pillVisible || _position.NeedsConfirmation)
             {
                 _lastHash = hash;
 
@@ -233,6 +236,7 @@ public sealed partial class Coordinator
                 var bigBytes = GetPixels(big, enlarged: true);
                 _lastLines = ScaleLines(await _ocr.RecognizeAsync(bigBytes, big.Width, big.Height), 1.0 / OcrScale);
 
+                if (!IsCurrent(watchVersion)) { _lastHash = 0; return; }
                 var parsed = CandidateParser.Parse(_lastLines.Select(l => l.Text).ToList());
                 _lastPinyin = parsed.Pinyin;
 
@@ -241,6 +245,7 @@ public sealed partial class Coordinator
                 if (string.IsNullOrEmpty(_lastPinyin))
                 {
                     var enhanced = await _ocr.RecognizeEnhancedAsync(bmp, new Rectangle(0, 0, w, h));
+                    if (!IsCurrent(watchVersion)) { _lastHash = 0; return; }
                     if (enhanced.Count > 0)
                     {
                         _lastPinyin = CandidateParser.Parse(enhanced).Pinyin;
@@ -292,6 +297,7 @@ public sealed partial class Coordinator
                             (int)(x2.Value - rowRectBmp.Value.X - 2),
                             rowRectBmp.Value.Height + 4);
                         var enhanced1 = await _ocr.RecognizeEnhancedAsync(bmp, crop);
+                        if (!IsCurrent(watchVersion)) { _lastHash = 0; return; }
                         var cand = enhanced1.Count > 0 ? CandidateParser.ExtractTop(string.Join(" ", enhanced1)) : null;
                         if (!string.IsNullOrEmpty(cand))
                         {
@@ -383,11 +389,12 @@ public sealed partial class Coordinator
 
 
             }
+            if (!IsCurrent(watchVersion) || revisionAtCapture != PinyinTracker.Revision) { _lastHash = 0; return; }
             top = _lastTop;
             gloss = _lastGloss;
             pinyin = _lastPinyin;
             theme = _cfg.PillMode == "custom" ? CustomTheme(_lastTheme) : _lastTheme;
-            // 贴合实际候选行下沿，避开皮肤装饰和透明留白；无可靠行坐标时回退窗口。
+            // 贴合实际候选行下沿，避开皮肤装饰和透明留白；首显等待独立采样确认，不使用装饰窗口作回退。
             if (_lastFrameTrusted && _hashRowBmp.HasValue && _hashRowWin.Width == w && _hashRowWin.Height == h)
                 _position.Observe(_hashRowBmp.Value, w, h, nowMs);
             _lastHasRow = _position.TryGet(rect, nowMs, out _lastRowRect);
@@ -400,6 +407,9 @@ public sealed partial class Coordinator
 
         // OCR may finish after the candidate window moved or disappeared; do not flash stale coordinates.
         if (!IsCurrent(watchVersion)) return;
+        // Count content confirmation alongside geometry, rather than adding a third startup OCR pass.
+        bool initialContentConfirmed = _pillVisible || (!string.IsNullOrEmpty(top) && top == _pendingTop);
+        if (!_pillVisible) _pendingTop = top;
         if (!_lastHasRow)
         {
             if (_pillVisible) { _pillVisible = false; await OnUi(() => _overlay!.HidePill()); }
@@ -418,17 +428,8 @@ public sealed partial class Coordinator
         }
         _lastGoodParse = DateTime.UtcNow;
 
-        // 首显确认：候选窗刚弹出时高亮在淡入，前 1-2 帧常解析出碎片字（囗/亻），
-        // 连续两帧同一候选才让悬浮条出现，避免先闪一下错字再纠正
-        if (!_pillVisible)
-        {
-            if (top != _pendingTop)
-            {
-                _pendingTop = top;
-                return;
-            }
-            _pendingTop = null;
-        }
+        if (!_pillVisible && !initialContentConfirmed) return;
+        if (!_pillVisible) _pendingTop = null;
 
         if (_lastFrameTrusted && inputAtCapture != null && revisionAtCapture == PinyinTracker.Revision
             && foregroundAtCapture == NativeMethods.GetForegroundWindow().ToInt64())
@@ -441,10 +442,10 @@ public sealed partial class Coordinator
         // 内容没变就不重绘（主题平滑后微小色差也不重绘），位置照常跟随
         bool contentChanged = top != _shownTop || gloss != _shownGloss || pinyin != _shownPinyin;
         bool themeChanged = ThemeDiffers(theme, _shownTheme);
-        _pillVisible = true;
         await OnUi(() =>
         {
-            if (!IsCurrent(watchVersion)) return;
+            if (!IsCurrent(watchVersion) || revisionAtCapture != PinyinTracker.Revision) { _lastHash = 0; return; }
+            _pillVisible = true;
             if (contentChanged || themeChanged)
             {
                 _overlay!.Update(top!, gloss, pinyin, theme);
