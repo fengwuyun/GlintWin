@@ -19,11 +19,12 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.19041
 OutputDir={#OutputPath}
-OutputBaseFilename=GlintWin-v0.4.4-setup-win-x64
+OutputBaseFilename=GlintWin-v0.4.4-setup-r2-win-x64
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\GlintWin.exe
+AppMutex=GlintWin_SingleInstance
 CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes
@@ -36,7 +37,19 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#AppExe}"; DestDir: "{app}"; DestName: "GlintWin.exe"; Flags: ignoreversion
 [Icons]
 Name: "{group}\GlintWin"; Filename: "{app}\GlintWin.exe"
-Name: "{autodesktop}\GlintWin"; Filename: "{app}\GlintWin.exe"; Tasks: desktopicon
+Name: "{autodesktop}\GlintWin"; Filename: "{app}\GlintWin.exe"; Check: ShouldCreateDesktopShortcut
+Name: "{userstartup}\GlintWin"; Filename: "{app}\GlintWin.exe"; Parameters: "-tray"; Check: HasStartupShortcut
 [Run]
 Filename: "{app}\GlintWin.exe"; Description: "{cm:LaunchProgram,GlintWin}"; Flags: nowait postinstall skipifsilent
 ; Deliberately no UninstallDelete for user data in LocalAppData\GlintWin.
+
+[Code]
+function HasStartupShortcut: Boolean;
+begin
+  Result := FileExists(ExpandConstant('{userstartup}\GlintWin.lnk'));
+end;
+
+function ShouldCreateDesktopShortcut: Boolean;
+begin
+  Result := WizardIsTaskSelected('desktopicon') or FileExists(ExpandConstant('{autodesktop}\GlintWin.lnk'));
+end;
