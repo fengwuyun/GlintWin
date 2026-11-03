@@ -59,6 +59,7 @@ public sealed class DailyWordStore : IDisposable
     }
     public void Record(string word, string pinyin, string? meaning, bool needsReview, DateTimeOffset? at = null)
     {
+        word = WordText.CleanTail(word);
         if (!ValidWord(word) || string.IsNullOrWhiteSpace(pinyin) || pinyin.Length > 256 || (meaning?.Length ?? 0) > 8192) return;
         var time = at ?? DateTimeOffset.Now;
         var date = time.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
@@ -95,11 +96,16 @@ ON CONFLICT(date,word) DO UPDATE SET count=count+1,first_seen=min(first_seen,exc
     {
         if (!DateTime.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)) throw new ArgumentException("Date must be yyyy-MM-dd.", nameof(date));
     }
-    private static string Filter(string status) => status == "待核对" ? " AND needs_review=1" : status.Length == 0 ? "" : " AND status=?";
+    private static string[] Statuses(string status) => status.Split('|',StringSplitOptions.RemoveEmptyEntries|StringSplitOptions.TrimEntries).Distinct().ToArray();
+    private static string Filter(string status)
+    {
+        var selected=Statuses(status);
+        return selected.Length==0?"":" AND ("+string.Join(" OR ",selected.Select(s=>s=="待核对"?"needs_review=1":"status=?"))+")";
+    }
     private static object[] Args(string date, string status, string search)
     {
         var args = new List<object> { date };
-        if (status.Length > 0 && status != "待核对") args.Add(status);
+        foreach(var selected in Statuses(status)) if(selected!="待核对")args.Add(selected);
         args.Add(search); args.Add(search); args.Add(search);
         return args.ToArray();
     }
@@ -135,7 +141,7 @@ ON CONFLICT(date,word) DO UPDATE SET count=count+1,first_seen=min(first_seen,exc
             // One query snapshot, streamed directly to disk, so concurrent recording cannot shift pages.
             Run("SELECT date,word,pinyin,meaning,count,status,needs_review FROM daily_words WHERE date=?" + Filter(status) + SearchSql + " ORDER BY last_seen DESC,id DESC", s =>
             {
-                var values = new[] { Text(s,0),Text(s,1),Text(s,2),Text(s,3),Text(s,4),Text(s,5),Native.sqlite3_column_int64(s,6)!=0?"是":"否" };
+                var values = new[] { Text(s,0),WordText.CleanTail(Text(s,1)),Text(s,2),Text(s,3),Text(s,4),Text(s,5),Native.sqlite3_column_int64(s,6)!=0?"是":"否" };
                 writer.WriteLine(string.Join(",", values.Select(CsvCell)));
             }, Args(date,status,search));
         });

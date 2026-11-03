@@ -5,6 +5,7 @@ namespace GlintWin;
 
 public sealed class Config
 {
+    public string ConsoleTheme { get; set; } = "dark";
     public bool AutoCollectDailyInput { get; set; } = false;
     public List<string> CollectionExcludedApps { get; set; } = new();
     public int PollIntervalMs { get; set; } = 40;

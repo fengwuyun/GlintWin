@@ -77,18 +77,27 @@ public static class CustomStore
     public static List<CustomWord> ImportCsv(string path)
     {
         var res = new List<CustomWord>();
-        foreach (var line in File.ReadLines(path, Encoding.UTF8))
+        using var parser=new Microsoft.VisualBasic.FileIO.TextFieldParser(path,Encoding.UTF8){TextFieldType=Microsoft.VisualBasic.FileIO.FieldType.Delimited,HasFieldsEnclosedInQuotes=true,TrimWhiteSpace=true};
+        parser.SetDelimiters(",");
+        while(!parser.EndOfData)
         {
-            var t = line.Trim();
-            if (t.Length == 0) continue;
-            var cols = t.Split(',');
-            if (cols.Length < 3 || cols[0].Trim() == "词条") continue;
-            var senses = string.Join("; ", cols.Skip(2).Select(c => c.Trim()).Where(c => c.Length > 0));
-            res.Add(new CustomWord(cols[0].Trim(), cols[1].Trim(), senses));
-        }
-        return res;
+            var cols=parser.ReadFields();
+            if(cols==null||cols.Length<3||cols[0].Trim()=="词条")continue;
+            var senses=string.Join("; ",cols.Skip(2).Select(c=>c.Trim()).Where(c=>c.Length>0));
+            res.Add(new CustomWord(cols[0].Trim(),cols[1].Trim(),senses));
+        }        return res;
     }
 
+    public static void MergeInto(IList<CustomWord> target,IEnumerable<CustomWord> imported)
+    {
+        foreach(var word in imported)
+        {
+            var key=word.Word.Trim();if(key.Length==0)continue;
+            var existing=target.FirstOrDefault(w=>string.Equals(w.Word.Trim(),key,StringComparison.Ordinal));
+            if(existing==null)target.Add(new CustomWord(key,word.Pinyin,word.Meaning));
+            else {existing.Pinyin=word.Pinyin;existing.Meaning=word.Meaning;}
+        }
+    }
     public static void ExportCsv(string path, IEnumerable<CustomWord> words)
     {
         var sb = new StringBuilder();
@@ -96,8 +105,8 @@ public static class CustomStore
         foreach (var w in words)
         {
             var senses = (w.Meaning ?? "").Split(';');
-            sb.Append(Escape(w.Word)).Append(',').Append(Escape(w.Pinyin)).Append(',')
-              .Append(Escape(Col(senses, 0))).Append(',').Append(Escape(Col(senses, 1))).AppendLine(Escape(Col(senses, 2)));
+            sb.Append(Escape(WordText.CleanTail(w.Word))).Append(',').Append(Escape(w.Pinyin)).Append(',')
+              .Append(Escape(Col(senses, 0))).Append(',').Append(Escape(Col(senses, 1))).Append(',').AppendLine(Escape(Col(senses, 2)));
         }
         File.WriteAllText(path, sb.ToString(), new UTF8Encoding(true));   // 带 BOM，Excel 直开不乱码
     }

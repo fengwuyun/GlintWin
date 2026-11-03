@@ -36,6 +36,14 @@ Check(store.Query(date,pageSize:1,sortByFrequency:true).Single().Word=="批量",
 var exportPath = path + ".csv";
 store.ExportCsv(exportPath,date,"","引'号");
 Check(File.ReadAllText(exportPath).Contains("引'号") && !File.ReadAllText(exportPath).Contains("你好"), "streamed filtered CSV export");
+Check(store.Count(date,"已忽略|待翻译")==store.Count(date,"已忽略")+store.Count(date,"待翻译"),"multi-status union count");
+Check(store.Count(date,"待核对|已忽略")==store.Count(date,"待核对")+store.Count(date,"已忽略"),"review and status union");
+store.ExportCsv(exportPath,date,"已忽略|待翻译");
+Check(File.ReadAllText(exportPath).Contains("你好")&&!File.ReadAllText(exportPath).Contains("候选二"),"multi-status export shares query filter");
+store.Record("尾巴@","wei ba",null,true);store.Flush();Check(store.Query(date,"","尾巴").Single().Word=="尾巴","record strips OCR suffix");
+var legacy=store.Query(date,"","尾巴").Single();legacy.Word="尾巴@";store.Update(legacy);
+store.ExportCsv(exportPath,date,"","尾巴");
+Check(File.ReadAllText(exportPath).Contains("\"尾巴\"")&&!File.ReadAllText(exportPath).Contains("尾巴@"),"legacy export strips suffix without rewriting stored history");
 File.Delete(exportPath);
 store.Record("删除","shan chu",null,true); store.DeleteDate(date); Check(store.Count(date)==0,"delete drains queue");
 store.Record("重开","chong kai",null,true); store.Flush();

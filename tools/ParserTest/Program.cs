@@ -14,6 +14,10 @@ void Check(string name, string? actual, string? expected)
     }
 }
 
+Check("保留技术词尾", WordText.CleanTail("语言C++"), "语言C++");
+Check("保留技术数字", WordText.CleanTail("维生素B12@"), "维生素B12");
+Check("尾随图标误读", CandidateParser.ExtractTop("1.我之前@ 2.以前"), "我之前");
+Check("尾随数字标记", CandidateParser.ExtractTop("1.更好1 2.好"), "更好");
 // ---------- 文本级 ExtractTop（真实日志样例） ----------
 Check("数字+全角分隔符", CandidateParser.ExtractTop("1.你好世界 2.你好 3.你号 4.拟好 5.倪好"), "你好世界");
 Check("序号与汉字粘连", CandidateParser.ExtractTop("你好世界2咻好3．你号4。拟好5．倪好"), "你好世界");

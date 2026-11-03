@@ -19,14 +19,14 @@ public sealed partial class ConsoleWindow
 {
     private DataGrid? _dailyGrid;
     private DatePicker? _dailyDate;
-    private ComboBox? _dailyFilter, _dailySort;
+    private ComboBox? _dailySort;
     private TextBox? _dailySearch, _dailyWord, _dailyPinyin, _dailyMeaning;
     private TextBlock? _dailySummary;
     private int _dailyPage, _dailyRequest;
     private UIElement BuildDailyPage()
     {
-        var sp = VStack(PageTitle("每日词汇"), Description("把每天遇到的词留在本机，核对后补充释义，再加入个人词库。"));
-        if (_daily == null) { sp.Children.Add(Card(Description("每日词汇数据库未能打开，请查看诊断日志。其他功能仍可使用。"))); return PageScroll(sp); }
+        var sp = VStack(PageTitle("词汇采集"), Description("把每天遇到的词留在本机，核对后补充释义，再加入个人词库。"));
+        if (_daily == null) { sp.Children.Add(Card(Description("词汇采集数据库未能打开，请查看诊断日志。其他功能仍可使用。"))); return PageScroll(sp); }
         var stateText = new TextBlock { Text = _cfg.AutoCollectDailyInput ? "自动采集已开启" : "自动采集已关闭", Foreground = FgBrush, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12,0,0,0) };
         var toggle = MakeSwitch(_cfg.AutoCollectDailyInput, on =>
         {
@@ -47,11 +47,13 @@ public sealed partial class ConsoleWindow
             new TextBlock { Text = "仅采集空格或可识别数字选中的候选，全部先标记待核对；鼠标选词、翻页后无法确认的候选会跳过。托盘“暂停”同时暂停采集。", Foreground = FgSubBrush, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0,10,0,12) },
             new TextBlock { Text = "不采集这些应用（进程名，用分号分隔）", Foreground = FgSubBrush, FontSize = 12, Margin = new Thickness(0,0,0,7) }, exclusionRow)));
         _dailyDate = new DatePicker { SelectedDate = DateTime.Today, Width = 136, Margin = new Thickness(0,0,8,0) };
-        _dailyFilter = new ComboBox { Width = 108, Margin = new Thickness(0,0,8,0), ItemsSource = new[]{"全部","待核对","待翻译","已有释义","已忽略","已入库"}, SelectedIndex = 0 };
-        _dailySearch = DailyInput(""); _dailySearch.Width = 155; _dailySearch.ToolTip = "搜索词条、拼音或释义";
+        var statusFilter = BuildStatusFilter();
+        _dailySearch = DailyInput(""); _dailySearch.Width = 139; _dailySearch.ToolTip = "搜索词条、拼音或释义";
         _dailySort = new ComboBox { Width = 100, Margin = new Thickness(0,0,8,0), ItemsSource = new[]{"最近出现","出现次数"}, SelectedIndex = 0 };
-        var refresh = FlatButton("筛选 / 刷新", () => { _dailyPage = 0; _ = LoadDailyAsync(); });
-        var filters = new WrapPanel { Margin = new Thickness(0,0,0,12), Children = { _dailyDate, _dailyFilter, _dailySearch, _dailySort, refresh } };
+        var refresh = FlatButton("刷新记录", () => { _dailyPage = 0; _ = LoadDailyAsync(); });
+        UIElement Field(string label,UIElement input) => VStack(new TextBlock{Text=label,Foreground=FgSubBrush,FontSize=11,Margin=new Thickness(0,0,0,6)},input);
+        refresh.Margin=new Thickness(0,20,0,0);
+        var filters = new WrapPanel { Margin = new Thickness(0,0,0,12), Children = { Field("日期",_dailyDate), Field("状态（可多选）",statusFilter), Field("搜索词条、拼音、释义",_dailySearch), Field("排序",_dailySort), refresh } };
         _dailyGrid = new DataGrid
         {
             AutoGenerateColumns = false, IsReadOnly = true, CanUserAddRows = false, CanUserDeleteRows = false,
@@ -67,7 +69,7 @@ public sealed partial class ConsoleWindow
         _dailyGrid.ColumnHeaderStyle=header;
         void Col(string title,string property,double weight) => _dailyGrid.Columns.Add(new DataGridTextColumn { Header=title, Binding=new Binding(property), Width=new DataGridLength(weight,DataGridLengthUnitType.Star), MinWidth=48, ElementStyle=style });
         Col("词条",nameof(DailyWordEntry.Word),1.2); Col("次数",nameof(DailyWordEntry.Count),.5); Col("释义",nameof(DailyWordEntry.Meaning),2); Col("状态",nameof(DailyWordEntry.Status),1);
-        _dailyGrid.Columns.Add(new DataGridCheckBoxColumn { Header="待核对",Binding=new Binding(nameof(DailyWordEntry.NeedsReview)),Width=65 });
+        _dailyGrid.Columns.Add(new DataGridTextColumn { Header="核对",Binding=new Binding(nameof(DailyWordEntry.NeedsReview)){Converter=new ReviewLabelConverter()},Width=65,ElementStyle=style });
         _dailyGrid.SelectionChanged += (_,_) =>
         {
             if (_dailyGrid?.SelectedItem is not DailyWordEntry entry) return;
@@ -86,13 +88,16 @@ public sealed partial class ConsoleWindow
         var wordGroup=VStack(CardTitle("词条"),_dailyWord);var pinyinGroup=VStack(CardTitle("拼音"),_dailyPinyin);Grid.SetColumn(pinyinGroup,1);editorRow.Children.Add(wordGroup);editorRow.Children.Add(pinyinGroup);
         sp.Children.Add(Card(VStack(CardTitle("核对与翻译"),editorRow,new TextBlock{Text="英文释义（多个释义可用分号分隔）",Foreground=FgSubBrush,Margin=new Thickness(0,12,0,6)},_dailyMeaning,
             new WrapPanel{Margin=new Thickness(0,12,0,0),Children={FlatButton("确认并保存",()=>_ = SaveDailyAsync(false,false)),FlatButton("忽略此词",()=>_ = SaveDailyAsync(true,false)),FlatButton("加入自定义词库",()=>_ = SaveDailyAsync(false,true))}})));
+        _dailyDate.SelectedDateChanged += (_,_) => QueueDailyFilter(false);
+        _dailySort.SelectionChanged += (_,_) => QueueDailyFilter(false);
+        _dailySearch.TextChanged += (_,_) => QueueDailyFilter(true);
         var page=PageScroll(sp); _dailyPage=0;
         page.Loaded += (_,_) => { if(_activePage=="daily") _ = LoadDailyAsync(); };
         return page;
     }
-    private static TextBox DailyInput(string text) => new() { Text=text,Foreground=FgBrush,Background=BgWindowBrush,BorderBrush=LineBrush,Padding=new Thickness(8,6,8,6),Margin=new Thickness(0,0,8,0),MinHeight=32 };
+    private TextBox DailyInput(string text) => new() { Text=text,Foreground=FgBrush,Background=BgWindowBrush,BorderBrush=LineBrush,Padding=new Thickness(8,6,8,6),Margin=new Thickness(0,0,8,0),MinHeight=32 };
     private string DailyDate => (_dailyDate?.SelectedDate ?? DateTime.Today).ToString("yyyy-MM-dd",CultureInfo.InvariantCulture);
-    private string DailyFilter => _dailyFilter?.SelectedItem is string f && f!="全部" ? f : "";
+    private string DailyFilter => string.Join("|",_dailyStatuses);
     private async Task LoadDailyAsync()
     {
         if(_daily==null||_dailyGrid==null)return;
@@ -100,7 +105,7 @@ public sealed partial class ConsoleWindow
         try
         {
             var result=await Task.Run(()=> { var count=_daily.Store.Count(date,filter,search); var actualPage=Math.Min(page,Math.Max(0,(count-1)/50));return (count,actualPage,rows:_daily.Store.Query(date,filter,search,actualPage,50,byFrequency)); });
-            if(request!=_dailyRequest||_dailyGrid==null)return;
+            if(request!=_dailyRequest||_dailyGrid==null||_activePage!="daily")return;
             _dailyPage=result.actualPage;_dailyGrid.ItemsSource=result.rows;
             _dailySummary!.Text=$"{date} · {result.count} 个词 · 第 {_dailyPage+1}/{Math.Max(1,(result.count+49)/50)} 页"+(_daily.Store.LastError==null?"":" · 写入异常："+_daily.Store.LastError);
         }

@@ -77,6 +77,7 @@ public partial class App : Application
         var cfg = Config.Load();
         _config = cfg;
         var dict = CedictDictionary.LoadAll(cfg);
+        ConsoleWindow.PausedProvider = () => _paused;
         ConsoleWindow.LastThemeProvider = () => _coordinator?.LastTheme;
         ConsoleWindow.DictionaryInfoText = dict != null
             ? $"{dict.Count:N0} 条 · CC-CEDICT（含拼音）"
@@ -158,6 +159,7 @@ public partial class App : Application
             _paused = !_paused;
             _daily?.RefreshEnabled();
             _pauseItem.Text = _paused ? "恢复" : "暂停";
+            _mainWin?.RefreshStatus();
             _watcher?.SetPaused(_paused);
             _mspWatcher?.SetPaused(_paused);
             PinyinTracker.SetPaused(_paused);

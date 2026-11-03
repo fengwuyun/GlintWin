@@ -111,6 +111,7 @@ public static partial class CandidateParser
         s = s.Replace(" ", "").Replace("\u00a0", "");
         s = LeadingNoiseRegex().Replace(s, "");
         s = TrailingNoiseRegex().Replace(s, "");
+        s = WordText.CleanTail(s);
         if (s.Length == 0 || s.Length > 16) return null;
         if (s.Contains('|') || s.Contains('[') || s.Contains(']')) return null;   // OCR 分隔符残留
         return CjkRegex().IsMatch(s) ? s : null;
@@ -143,6 +144,7 @@ public static partial class CandidateParser
         s = LeadingNoiseRegex().Replace(s, "");
         s = TrailingNoiseRegex().Replace(s, "");
 
+        s = WordText.CleanTail(s);
         if (s.Length == 0 || s.Length > 16) return null;
         return CjkRegex().IsMatch(s) ? s : null;
     }

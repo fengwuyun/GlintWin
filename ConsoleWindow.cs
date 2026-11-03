@@ -1,3 +1,4 @@
+using TextBox = System.Windows.Controls.TextBox;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
@@ -46,14 +47,17 @@ public sealed partial class ConsoleWindow : Window
 
     private readonly Config _cfg;
     private readonly DailyCollectionService? _daily;
+    public static Func<bool>? PausedProvider { get; set; }
     public static string RuntimeStatusText { get; set; } = "离线 OCR 状态待检查";
     private readonly Func<CedictDictionary?> _dictProvider;
     private readonly Action _reloadDictionary;
     private readonly ContentControl _pageHost = new();
     private readonly List<(Border Item, Border Accent, TextBlock Label, TextBlock Glyph, string Key)> _navItems = new();
-    private static readonly Brush NavIdleBrush = new SolidColorBrush(Color.FromRgb(0xC5, 0xC9, 0xD4));
+    private readonly SolidColorBrush NavIdleBrush = new SolidColorBrush(Color.FromRgb(0xC5, 0xC9, 0xD4));
     private string _activePage = "status";
     private readonly ObservableCollection<CustomWord> _customWords;
+    private TextBox? _customSearch;
+    private DataGrid? _customGrid;
     private WrapPanel? _recentColors;
     private readonly System.Windows.Threading.DispatcherTimer _saveTimer = new() { Interval = TimeSpan.FromMilliseconds(350) };
     private bool _configDirty;
@@ -80,18 +84,19 @@ public sealed partial class ConsoleWindow : Window
 
     // 主题色
     private static readonly Color Accent = Color.FromRgb(0x6B, 0x8A, 0xFB);
-    private static readonly Brush AccentBrush = new SolidColorBrush(Accent);
-    private static readonly Brush BgWindowBrush = new SolidColorBrush(Color.FromRgb(0x13, 0x15, 0x1A));
-    private static readonly Brush BgCardBrush = new SolidColorBrush(Color.FromRgb(0x1C, 0x1F, 0x27));
-    private static readonly Brush BgHoverBrush = new SolidColorBrush(Color.FromArgb(60, 0x6B, 0x8A, 0xFB));
-    private static readonly Brush FgBrush = new SolidColorBrush(Color.FromRgb(0xEF, 0xF0, 0xF4));
-    private static readonly Brush FgSubBrush = new SolidColorBrush(Color.FromRgb(0x9C, 0xA0, 0xAD));
-    private static readonly Brush LineBrush = new SolidColorBrush(Color.FromRgb(0x2C, 0x30, 0x3B));
+    private readonly SolidColorBrush AccentBrush = new SolidColorBrush(Accent);
+    private readonly SolidColorBrush BgWindowBrush = new SolidColorBrush(Color.FromRgb(0x13, 0x15, 0x1A));
+    private readonly SolidColorBrush BgCardBrush = new SolidColorBrush(Color.FromRgb(0x1C, 0x1F, 0x27));
+    private readonly SolidColorBrush BgHoverBrush = new SolidColorBrush(Color.FromArgb(60, 0x6B, 0x8A, 0xFB));
+    private readonly SolidColorBrush FgBrush = new SolidColorBrush(Color.FromRgb(0xEF, 0xF0, 0xF4));
+    private readonly SolidColorBrush FgSubBrush = new SolidColorBrush(Color.FromRgb(0x9C, 0xA0, 0xAD));
+    private readonly SolidColorBrush LineBrush = new SolidColorBrush(Color.FromRgb(0x2C, 0x30, 0x3B));
 
     public ConsoleWindow(Config cfg, Func<CedictDictionary?> dictProvider, Action reloadDictionary, DailyCollectionService? daily = null)
     {
         _daily = daily;
         _cfg = cfg;
+        ApplyConsoleTheme();
         _dictProvider = dictProvider;
         _reloadDictionary = reloadDictionary;
         _customWords = new ObservableCollection<CustomWord>(CustomStore.Load());
@@ -110,18 +115,19 @@ public sealed partial class ConsoleWindow : Window
         UseLayoutRounding = true;
         SnapsToDevicePixels = true;
         InstallControlStyles();
+        InstallCollectionStyles();
         _saveTimer.Tick += (_, _) => FlushConfig();
         Closed += (_, _) => { FlushConfig(); _saveTimer.Stop(); };
         SourceInitialized += (_, _) =>
         {
-            int dark = 1;
+            int dark = _cfg.ConsoleTheme == "light" ? 0 : 1;
             DwmSetWindowAttribute(new System.Windows.Interop.WindowInteropHelper(this).Handle, 20, ref dark, sizeof(int));
         };
 
         var sidebar = new Border
         {
             Width = 200,
-            Background = new SolidColorBrush(Color.FromRgb(0x10, 0x12, 0x17)),
+            Background = SidebarBrush,
             Child = BuildSidebar(),
         };
 
@@ -175,27 +181,28 @@ public sealed partial class ConsoleWindow : Window
         sp.Children.Add(NavItem("look", "\uE790", "悬浮条外观"));
         sp.Children.Add(NavLabel("词库"));
         sp.Children.Add(NavItem("dict", "\uE8A5", "词库管理"));
-        sp.Children.Add(NavItem("daily", "\uE787", "每日词汇"));
+        sp.Children.Add(NavItem("daily", "\uE787", "词汇采集"));
         sp.Children.Add(NavLabel("系统"));
         sp.Children.Add(NavItem("settings", "\uE713", "通用设置"));
 
         sp.Children.Add(new Border { Height = 1, Background = LineBrush, Margin = new Thickness(8, 14, 8, 10), Opacity = 0.5 });
         sp.Children.Add(new TextBlock
         {
-            Text = "v0.4.3 · 全离线处理\n每日采集可选 · 不上传",
+            Text = "v0.4.4 · 全离线处理\n每日采集可选 · 不上传",
             FontSize = 11,
             Foreground = FgSubBrush,
             Margin = new Thickness(8, 0, 0, 0),
             LineHeight = 17,
         });
+        sp.Children.Add(FlatButton("◐  黑 / 白主题", () => SetConsoleTheme(_cfg.ConsoleTheme == "light" ? "dark" : "light")));
         return sp;
     }
 
-    private static TextBlock NavLabel(string t) => new()
+    private TextBlock NavLabel(string t) => new()
     {
         Text = t,
         FontSize = 12,
-        Foreground = new SolidColorBrush(Color.FromRgb(0xB4, 0xB9, 0xC6)),
+        Foreground = FgSubBrush,
         Margin = new Thickness(10, 16, 0, 8),
     };
 
@@ -267,7 +274,8 @@ public sealed partial class ConsoleWindow : Window
             _svThumb = _hueThumb = null; _svFill = null;
             _tgtBgBtn = _tgtFgBtn = null; _recentColors = null;
         }
-        if (key != "daily") { _dailyRequest++; _dailyGrid = null; }
+        _dailyRequest++; _filterTimer?.Stop();
+        if (key != "daily") _dailyGrid = null;
         _activePage = key;
         foreach (var (item, accent, labelTb, glyphTb, k) in _navItems)
         {
@@ -300,7 +308,7 @@ public sealed partial class ConsoleWindow : Window
         Padding = new Thickness(28, 24, 28, 24),
     };
 
-    private static TextBlock Description(string text) => new()
+    private TextBlock Description(string text) => new()
     {
         Text = text, Foreground = FgSubBrush, FontSize = 12.5, TextWrapping = TextWrapping.Wrap,
         Margin = new Thickness(0, -4, 0, 20),
@@ -346,7 +354,7 @@ public sealed partial class ConsoleWindow : Window
         Resources.MergedDictionaries.Add((ResourceDictionary)System.Windows.Markup.XamlReader.Parse(xaml));
     }
 
-    private static TextBlock PageTitle(string t) => new()
+    private TextBlock PageTitle(string t) => new()
     {
         Text = t,
         FontSize = 25,
@@ -355,7 +363,7 @@ public sealed partial class ConsoleWindow : Window
         Margin = new Thickness(0, 0, 0, 14),
     };
 
-    private static TextBlock CardTitle(string t) => new()
+    private TextBlock CardTitle(string t) => new()
     {
         Text = t,
         FontSize = 13.5,
@@ -364,7 +372,7 @@ public sealed partial class ConsoleWindow : Window
         Margin = new Thickness(0, 0, 0, 10),
     };
 
-    private static Border Card(UIElement content) => new()
+    private Border Card(UIElement content) => new()
     {
         Background = BgCardBrush,
         BorderBrush = LineBrush,
@@ -386,35 +394,32 @@ public sealed partial class ConsoleWindow : Window
     private UIElement BuildStatusPage()
     {
         var dict = _dictProvider();
-        var packsOn = _cfg.EnabledPacks.Count > 0 ? string.Join("、", _cfg.EnabledPacks) : "（无）";
-
-        var statusCard = Card(VStack(
-            new TextBlock { Text = "● 监控中", Foreground = new SolidColorBrush(Color.FromRgb(0x4C, 0xC3, 0x6F)), FontWeight = FontWeights.SemiBold },
-            new TextBlock { Text = RuntimeStatusText, Foreground = FgSubBrush, Margin = new Thickness(0, 6, 0, 0) },
-            new TextBlock { Text = "悬浮条跟随输入法皮肤取色，释义全离线查询，按键仅识别拼音不上传", Foreground = FgSubBrush, Margin = new Thickness(0, 2, 0, 0) }));
-
-        var dictCard = Card(VStack(
-            CardTitle("词典"),
-            new TextBlock { Text = ConsoleWindow.DictionaryInfoText ?? "—", Foreground = FgBrush, Margin = new Thickness(0, 0, 0, 6) },
-            new TextBlock
-            {
-                Text = dict == null ? "（未加载）" : $"基础词条 {dict.BaseCount:N0} ｜ 主题词包 +{dict.PackCounts.Values.Sum():N0} ｜ 自定义 +{dict.CustomCount:N0}",
-                Foreground = FgSubBrush,
-            },
-            new TextBlock { Text = "启用的词包：" + packsOn, Foreground = FgSubBrush, Margin = new Thickness(0, 6, 0, 0) }));
-
-        var tipCard = Card(VStack(
-            CardTitle("小提示"),
-            new TextBlock
-            {
-                Text = "· 悬浮条永远在候选行下方，鼠标穿透不打断输入\n· 外观页可一键套用调色盘或自定义任意颜色\n· 词库管理页可启停主题词包、维护自定义词库（支持 CSV 模板导入）",
-                Foreground = FgSubBrush,
-                LineHeight = 20,
-            }));
-
-        return PageScroll(VStack(PageTitle("状态总览"), statusCard, dictCard, tipCard));
+        bool paused = PausedProvider?.Invoke() == true;
+        var status = new TextBlock { Text = paused ? "已暂停" : "正在运行", Foreground = AccentBrush, FontSize = 22, FontWeight = FontWeights.SemiBold };
+        var hero = Card(VStack(status, new TextBlock { Text = RuntimeStatusText, Foreground = FgSubBrush, Margin = new Thickness(0,8,0,16) },
+            new WrapPanel { Children = { FlatButton("查看采集词汇 →", () => ShowPage("daily")), FlatButton("调整悬浮条", () => ShowPage("look")) } }));
+        var metrics = new System.Windows.Controls.Primitives.UniformGrid { Columns=3 };
+        void Metric(string label,string value,string detail)
+        {
+            var card=Card(VStack(new TextBlock{Text=label,Foreground=FgSubBrush},new TextBlock{Text=value,FontSize=30,FontWeight=FontWeights.SemiBold,Foreground=FgBrush,Margin=new Thickness(0,10,0,6)},new TextBlock{Text=detail,Foreground=FgSubBrush,FontSize=11.5,TextWrapping=TextWrapping.Wrap}));
+            card.Margin=new Thickness(0,0,10,12);metrics.Children.Add(card);
+        }
+        Metric("可查词头",dict?.Count.ToString("N0")??"—","基础词典、主题词包与个人词库");
+        Metric("启用词包",_cfg.EnabledPacks.Count.ToString(),"按需启用，管理页即时重载");
+        Metric("个人新增",dict?.CustomCount.ToString("N0")??"—","个人词条优先于基础释义");
+        var composition=VStack(CardTitle("词库构成"));
+        void Bar(string label,int value)
+        {
+            composition.Children.Add(new TextBlock{Text=$"{label}   {value:N0}",Foreground=FgBrush,Margin=new Thickness(0,10,0,6)});
+            var fill=new Border{Background=AccentBrush,CornerRadius=new CornerRadius(3),HorizontalAlignment=HorizontalAlignment.Left};
+            var track=new Grid{Height=6,Background=ButtonBrush,Children={fill}};
+            track.SizeChanged+=(_,_)=>fill.Width=track.ActualWidth*Math.Clamp((double)value/Math.Max(1,dict?.Count??0),0,1);
+            composition.Children.Add(track);
+        }
+        Bar("基础词典",dict?.BaseCount??0);Bar("主题新增",dict?.PackCounts.Values.Sum()??0);Bar("个人新增",dict?.CustomCount??0);
+        var collection=Card(VStack(CardTitle("词汇采集"),new TextBlock{Text=_cfg.AutoCollectDailyInput?"自动采集已开启":"自动采集已关闭",Foreground=FgBrush,FontSize=17},new TextBlock{Text="记录保存在本机；核对释义后可加入个人词库。",Foreground=FgSubBrush,Margin=new Thickness(0,8,0,12),TextWrapping=TextWrapping.Wrap},FlatButton("管理词库 →",()=>ShowPage("dict"))));
+        return PageScroll(VStack(PageTitle("状态总览"),hero,metrics,Card(composition),collection));
     }
-
     // ==================== 悬浮条外观 ====================
     private UIElement BuildLookPage()
     {
@@ -539,9 +544,9 @@ public sealed partial class ConsoleWindow : Window
         _hue = delta == 0 ? 0 : max == r ? 60 * (((g - b) / delta + 6) % 6) : max == g ? 60 * ((b - r) / delta + 2) : 60 * ((r - g) / delta + 4);
         UpdatePickerThumbs();
         if (_tgtBgBtn != null)
-            _tgtBgBtn.Background = new SolidColorBrush(t == "bg" ? Accent : Color.FromRgb(0x35, 0x35, 0x3D));
+            _tgtBgBtn.Background = t == "bg" ? AccentBrush : ButtonBrush;
         if (_tgtFgBtn != null)
-            _tgtFgBtn.Background = new SolidColorBrush(t == "fg" ? Accent : Color.FromRgb(0x35, 0x35, 0x3D));
+            _tgtFgBtn.Background = t == "fg" ? AccentBrush : ButtonBrush;
     }
 
     private void BuildPicker(out UIElement svBoxEl, out UIElement hueGridEl)
@@ -655,12 +660,12 @@ public sealed partial class ConsoleWindow : Window
         ("奶油白", "#FFFBF7F0", "#FF6B5B4E", 90),
     };
 
-    private static Button FlatButton(string text, Action onClick)
+    private Button FlatButton(string text, Action onClick)
     {
         var button = new Button
         {
             Content = text, Padding = new Thickness(14, 8, 14, 8), Margin = new Thickness(0, 0, 10, 0),
-            Background = new SolidColorBrush(Color.FromRgb(0x2B, 0x30, 0x3B)), Foreground = FgBrush,
+            Background = ButtonBrush, Foreground = FgBrush,
             BorderBrush = LineBrush, BorderThickness = new Thickness(1), Cursor = Cursors.Hand,
         };
         button.Click += (_, _) => onClick();
@@ -771,13 +776,13 @@ public sealed partial class ConsoleWindow : Window
             CanUserDeleteRows = false,
             Height = 230,
             Background = Brushes.Transparent,
-            RowBackground = new SolidColorBrush(Color.FromRgb(0x22, 0x22, 0x28)),
-            AlternatingRowBackground = new SolidColorBrush(Color.FromRgb(0x28, 0x28, 0x30)),
+            RowBackground = BgCardBrush,
+            AlternatingRowBackground = BgWindowBrush,
             BorderBrush = LineBrush,
             BorderThickness = new Thickness(1),
             GridLinesVisibility = DataGridGridLinesVisibility.Horizontal,
-            HorizontalGridLinesBrush = new SolidColorBrush(Color.FromRgb(0x35, 0x35, 0x3D)),
-            ItemsSource = _customWords,
+            HorizontalGridLinesBrush = LineBrush,
+            ItemsSource = System.Windows.Data.CollectionViewSource.GetDefaultView(_customWords),
         };
         var fgStyle = new Style(typeof(System.Windows.Controls.TextBlock));
         fgStyle.Setters.Add(new Setter(System.Windows.Controls.TextBlock.ForegroundProperty, FgBrush));
@@ -807,10 +812,8 @@ public sealed partial class ConsoleWindow : Window
             var dlg = new WinForms.OpenFileDialog { Filter = "CSV 文件 (*.csv)|*.csv", Title = "导入自定义词库" };
             if (dlg.ShowDialog() == WinForms.DialogResult.OK)
             {
-                foreach (var w in CustomStore.ImportCsv(dlg.FileName))
-                    if (_customWords.All(x => !string.Equals(x.Word, w.Word, StringComparison.Ordinal)))
-                        _customWords.Add(w);
-                MessageBox.Show(this, $"导入完成，当前 {_customWords.Count} 条。点「保存并重载」生效。", "GlintWin");
+                CustomStore.MergeInto(_customWords, CustomStore.ImportCsv(dlg.FileName));
+                MessageBox.Show(this, $"导入完成，同名词已使用新翻译覆盖，当前 {_customWords.Count} 条。点「保存并重载」生效。", "GlintWin");
             }
         }));
         toolbar.Children.Add(FlatButton("导出 CSV", () =>
@@ -828,6 +831,13 @@ public sealed partial class ConsoleWindow : Window
             Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{CustomStore.TemplatePath}\"") { UseShellExecute = true });
         }));
 
+        var customSearch=DailyInput("");customSearch.ToolTip="搜索词条、拼音、释义";
+        _customSearch=customSearch;_customGrid=grid;
+        var customView=System.Windows.Data.CollectionViewSource.GetDefaultView(_customWords);
+        customView.Filter=null;
+        customSearch.TextChanged+=(_,_)=>{var query=customSearch.Text.Trim();customView.Filter=item=>item is CustomWord word&&(query.Length==0||word.Word.Contains(query,StringComparison.OrdinalIgnoreCase)||word.Pinyin.Contains(query,StringComparison.OrdinalIgnoreCase)||word.Meaning.Contains(query,StringComparison.OrdinalIgnoreCase));};
+        var searchPanel=VStack(new TextBlock{Text="搜索个人词条 · 词条 / 拼音 / 释义",Foreground=FgSubBrush,Margin=new Thickness(0,0,0,6)},customSearch);
+        searchPanel.Margin=new Thickness(0,0,0,12);
         var hint = new TextBlock
         {
             Text = "模板：Data\\custom_template.csv（列：词条,拼音,释义1[,释义2,释义3]，UTF-8 带 BOM）。自定义词条优先于主词典与主题词包。",
@@ -844,7 +854,7 @@ public sealed partial class ConsoleWindow : Window
             MessageBox.Show(this, "自定义词库已保存并重载。", "GlintWin");
         });
 
-        sp.Children.Add(Card(VStack(CardTitle("自定义词库"), toolbar, grid, hint,
+        sp.Children.Add(Card(VStack(CardTitle("自定义词库"), searchPanel, toolbar, grid, hint,
             new StackPanel { Margin = new Thickness(0, 10, 0, 0), Children = { saveBtn } })));
 
         return PageScroll(sp);
@@ -876,6 +886,7 @@ public sealed partial class ConsoleWindow : Window
     private UIElement BuildSettingsPage()
     {
         var sp = VStack(PageTitle("通用设置"));
+        sp.Children.Add(Card(VStack(CardTitle("控制台主题"), new WrapPanel { Children = { FlatButton("深色", () => SetConsoleTheme("dark")), FlatButton("浅色", () => SetConsoleTheme("light")) } })));
 
         var startup = new StackPanel
         {
@@ -894,8 +905,8 @@ public sealed partial class ConsoleWindow : Window
 
         sp.Children.Add(Card(VStack(
             CardTitle("关于"),
-            new TextBlock { Text = "GlintWin v0.4.3 — 输入中文，顺手看见英文。", Foreground = FgBrush, Margin = new Thickness(0, 0, 0, 4) },
-            new TextBlock { Text = "全离线运行，不上传输入。每日词汇默认关闭，开启后仅本地保存待核对词条。", Foreground = FgSubBrush, Margin = new Thickness(0, 0, 0, 4) },
+            new TextBlock { Text = "GlintWin v0.4.4 — 输入中文，顺手看见英文。", Foreground = FgBrush, Margin = new Thickness(0, 0, 0, 4) },
+            new TextBlock { Text = "全离线运行，不上传输入。词汇采集默认关闭，开启后仅本地保存待核对词条。", Foreground = FgSubBrush, Margin = new Thickness(0, 0, 0, 4) },
             new TextBlock { Text = "词典：CC-CEDICT（CC-BY-SA 4.0）+ 主题词包 + 自定义词库。", Foreground = FgSubBrush })));
 
         var btnLogs = FlatButton("打开日志文件夹", () =>
@@ -913,7 +924,7 @@ public sealed partial class ConsoleWindow : Window
         return PageScroll(sp);
     }
 
-    private static void SetSwitchState(Border track, bool on)
+    private void SetSwitchState(Border track, bool on)
     {
         track.Tag = on;
         track.Background = on ? AccentBrush : new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x60));

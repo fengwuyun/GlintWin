@@ -10,6 +10,6 @@
   <ItemGroup>
     <Compile Include="..\..\Models.cs" Link="Models.cs" />
     <Compile Include="..\..\CandidateParser.cs" Link="CandidateParser.cs" />
-  </ItemGroup>
+  <Compile Include="../../WordText.cs" Link="WordText.cs"/></ItemGroup>
 
 </Project>

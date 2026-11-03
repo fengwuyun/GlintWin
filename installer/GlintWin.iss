@@ -7,7 +7,7 @@
 [Setup]
 AppId={{195B6217-31F0-4B21-A9FC-DCBB8A43C240}
 AppName=GlintWin
-AppVersion=0.4.3
+AppVersion=0.4.4
 AppPublisher=GlintWin
 AppPublisherURL=https://github.com/fengwuyun/GlintWin
 AppSupportURL=https://github.com/fengwuyun/GlintWin/issues
@@ -19,7 +19,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.19041
 OutputDir={#OutputPath}
-OutputBaseFilename=GlintWin-v0.4.3-setup-win-x64
+OutputBaseFilename=GlintWin-v0.4.4-setup-win-x64
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

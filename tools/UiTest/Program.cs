@@ -21,7 +21,8 @@ class Program
         Check(!File.Exists(Path.Combine(AppPaths.Root, "daily-words.db")), "disabled collection leaves database unopened");
         daily.Store.Record("学习", "xue xi", "learn; study", true);
         daily.Store.Record("待译词", "dai yi ci", null, true);
-        var window = new ConsoleWindow(cfg, () => null, () => {}, daily);
+        var previewDictionary = CedictDictionary.LoadAll(cfg);
+        var window = new ConsoleWindow(cfg, () => previewDictionary, () => {}, daily);
         void Await(Task task)
         {
             if (!task.IsCompleted)
@@ -74,21 +75,64 @@ class Program
             foreach (var child in LogicalTreeHelper.GetChildren(root).OfType<DependencyObject>())
                 foreach (var value in Texts(child)) yield return value;
         }
+        Check(Texts(window).Contains("词汇采集"), "collection page renamed in navigation");
         Check(Texts((DependencyObject)Call("BuildDictPage")!).Contains("test_extra"), "new dictionary packs appear without code changes");
         File.Delete(Path.Combine(AppPaths.Root, "Data", "Packs", "test_extra.json"));
+        var imported=new List<CustomWord>{new("重复","chong fu","old")};
+        CustomStore.MergeInto(imported,new[]{new CustomWord("重复","new pinyin","new, meaning; second; third"),new CustomWord("新增","xin zeng","added")});
+        Check(imported.Count==2 && imported[0].Meaning=="new, meaning; second; third","CSV merge replaces duplicate definitions");
+        var csv=Path.Combine(AppPaths.Root,"roundtrip.csv");CustomStore.ExportCsv(csv,imported);
+        var reimported=CustomStore.ImportCsv(csv);
+        Check(reimported.Count==2&&reimported[0].Meaning==imported[0].Meaning,"CSV quoted commas and three senses round trip");
+        Call("ShowPage","dict");((TextBox)Field("_customSearch")!).Text="pending";
+        Check(((DataGrid)Field("_customGrid")!).Items.Count==1,"custom dictionary search matches translation");
+        ((TextBox)Field("_customSearch")!).Text="no-such-word";
+        Check(((DataGrid)Field("_customGrid")!).Items.Count==0,"custom dictionary search excludes other entries");
+        Call("ShowPage", "daily"); Await((Task)Call("LoadDailyAsync")!);
+        void WaitFor(Func<bool> condition) { for(int i=0;i<100&&!condition();i++) Await(Task.Delay(20)); Check(condition(), "live filter updates results"); }
+        var dateControl=(DatePicker)Field("_dailyDate")!;
+        dateControl.SelectedDate=DateTime.Today.AddDays(-1);
+        WaitFor(()=>((DataGrid)Field("_dailyGrid")!).Items.Count==0);
+        dateControl.SelectedDate=DateTime.Today;
+        WaitFor(()=>((DataGrid)Field("_dailyGrid")!).Items.Count==2);
+        ((TextBox)Field("_dailySearch")!).Text="学习";
+        WaitFor(()=>((DataGrid)Field("_dailyGrid")!).Items.Count==1);
+        Call("SetDailyStatuses","已入库");
+        WaitFor(()=>((DataGrid)Field("_dailyGrid")!).Items.Count==0);
+        ((TextBox)Field("_dailySearch")!).Text="";
+        WaitFor(()=>((DataGrid)Field("_dailyGrid")!).Items.Count==1);
+        Call("SetDailyStatuses","");
+        WaitFor(()=>((DataGrid)Field("_dailyGrid")!).Items.Count==2);
+        Call("SetDailyStatuses","已入库|待翻译");
+        WaitFor(()=>((DataGrid)Field("_dailyGrid")!).Items.Count==1);
+        Call("SetDailyStatuses","已入库|已有释义");
+        WaitFor(()=>((DataGrid)Field("_dailyGrid")!).Items.Count==2);
+        foreach(var theme in new[]{"light","dark"})
+        {
+        Call("SetConsoleTheme",theme);
+        Check(cfg.ConsoleTheme==theme && Config.Load().ConsoleTheme==theme,"console theme persists: "+theme);
+        Check(cfg.PillOpacityPercent==73,"console theme preserves overlay settings");
         foreach (var page in new[]{"look", "settings", "status", "dict", "daily"})
         {
             Call("ShowPage", page);
             if (page == "daily") Await((Task)Call("LoadDailyAsync")!);
             window.UpdateLayout();
+            if(page=="daily")
+            {
+                var date=(DatePicker)Field("_dailyDate")!;
+                date.IsDropDownOpen=true;Await(Task.Delay(60));
+                Check(date.IsDropDownOpen,"themed calendar popup opens: "+theme);
+                date.IsDropDownOpen=false;
+            }
             window.Dispatcher.Invoke(() => {}, System.Windows.Threading.DispatcherPriority.ContextIdle);
             var content = (FrameworkElement)window.Content;
             var bmp = new RenderTargetBitmap((int)content.ActualWidth, (int)content.ActualHeight, 96, 96, PixelFormats.Pbgra32);
             bmp.Render(content);
             var png = new PngBitmapEncoder(); png.Frames.Add(BitmapFrame.Create(bmp));
             Directory.CreateDirectory(args[0]);
-            using var stream = File.Create(Path.Combine(args[0], page + ".png")); png.Save(stream);
+            using var stream = File.Create(Path.Combine(args[0], theme+"-"+page + ".png")); png.Save(stream);
             Check(content.ActualWidth > 800, "render " + page);
+        }
         }
         window.Close();
         Console.WriteLine("ALL UI TESTS PASS");
